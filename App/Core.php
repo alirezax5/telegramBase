@@ -40,7 +40,8 @@ class Core
 
         $this->telegram = new Telegram(
             EnvHandler::get('BOT_TOKEN'),
-            EnvHandler::get('BOT_API_URL')
+            EnvHandler::get('BOT_API_URL'),
+            EnvHandler::get('BOT_API_URL_FILE')
         );
 
         $this->queueManager = new QueueManager([
