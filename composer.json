@@ -1,6 +1,6 @@
 {
   "name": "alirezax5/telegram-base",
-  "description": "Telegram Bot Base Framework (project skeleton)",
+  "description": "Telegram Bot Base Framework (project skeleton).",
   "type": "project",
   "license": "MIT",
   "minimum-stability": "stable",
