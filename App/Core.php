@@ -17,7 +17,7 @@ use Symfony\Component\Filesystem\Path;
 class Core
 {
     private Telegram $telegram;
-    private array $updates = [];
+    private  $updates = [];
     private EnvironmentValidator $envValidator;
     private string $appDataFolder;
     private string $lastUpdateFile;
