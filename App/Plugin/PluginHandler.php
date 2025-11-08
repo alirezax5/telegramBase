@@ -111,9 +111,9 @@ class PluginHandler
             $pluginClass = get_class($plugin);
             LogHandler::info("🚀 Running plugin: " . $pluginClass);
 
-            $this->executePluginMethod($plugin, 'Before', $updateData, $telegram);
+            $this->executePluginMethod($plugin, 'before', $updateData, $telegram);
             $this->executePluginMethod($plugin, $handlerMethod, $updateData, $telegram);
-            $this->executePluginMethod($plugin, 'After', $updateData, $telegram);
+            $this->executePluginMethod($plugin, 'after', $updateData, $telegram);
 
             LogHandler::info("✅ Completed plugin: " . $pluginClass);
         }

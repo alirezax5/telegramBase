@@ -17,8 +17,26 @@ class Start implements PluginBase
     public function onMessage($update, Telegram $telegram)
     {
         SharedManagement::set('findCommand', 'na');
-            $telegram->sendMessage($update->from->id, $update->text,reply_markup: btn('start'));
+        $telegram->sendMessage($update->from->id, $update->text, reply_markup: btn('start'));
 
 
     }
+    public function onEditedMessage($update, Telegram $telegram)
+    {
+
+    }
+    public function onCallbackQuery($update, Telegram $telegram)
+    {
+
+    }
+    public function onInlineQuery($update, Telegram $telegram)
+    {
+
+    }
+    public function onPollAnswer($update, Telegram $telegram)
+    {
+
+    }
+
+    #.. سایر آپدیت ها
 }
