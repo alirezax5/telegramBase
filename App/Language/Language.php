@@ -126,7 +126,7 @@ class Language
         }
 
         foreach ($replacements as $placeholder => $replacement) {
-            $value = str_replace("#{$placeholder}", $replacement, $value);
+            $value = str_replace("#{$placeholder}", (string)$replacement, $value);
         }
 
         return $value;
