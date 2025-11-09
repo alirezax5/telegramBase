@@ -3,8 +3,11 @@
 namespace alirezax5\TelegramBase\App\Queue\Drivers;
 
 use alirezax5\TelegramBase\App\Queue\QueueInterface;
+use alirezax5\TelegramBase\App\Logger\LogHandler;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
+use PhpAmqpLib\Exception\AMQPIOException;
+use PhpAmqpLib\Exception\AMQPConnectionClosedException;
 use Exception;
 
 class RabbitQueue implements QueueInterface
@@ -12,30 +15,66 @@ class RabbitQueue implements QueueInterface
     protected ?AMQPStreamConnection $connection = null;
     protected $channel;
     protected string $queue;
+    protected array $config;
 
     public function __construct(array $config)
     {
+        $this->config = $config;
         $this->queue = $config['queue'] ?? 'bot_queue';
+
+        $this->connect();
+    }
+
+    private function connect(): void
+    {
         try {
             $this->connection = new AMQPStreamConnection(
-                $config['host'],
-                $config['port'],
-                $config['user'],
-                $config['password']
+                $this->config['host'] ?? '127.0.0.1',
+                $this->config['port'] ?? 5672,
+                $this->config['user'] ?? 'guest',
+                $this->config['password'] ?? 'guest',
+                $this->config['vhost'] ?? '/' // ✅ اضافه شده
             );
+
             $this->channel = $this->connection->channel();
-            $this->channel->queue_declare($this->queue, false, true, false, false);
-        } catch (Exception) {
+            $this->channel->queue_declare(
+                $this->queue,
+                false,  // passive
+                true,   // durable
+                false,  // exclusive
+                false   // auto-delete
+            );
+
+            LogHandler::info("✅ Connected to RabbitMQ queue '{$this->queue}'");
+
+        } catch (Exception $e) {
             $this->connection = null;
+            LogHandler::error("❌ RabbitMQ connection failed: " . $e->getMessage());
         }
+    }
+
+    private function reconnectIfNeeded(): bool
+    {
+        if (!$this->isConnected()) {
+            LogHandler::warning("🔄 Reconnecting to RabbitMQ...");
+            $this->connect();
+        }
+
+        return $this->isConnected();
     }
 
     public function push(array $update): bool
     {
-        if (!$this->isConnected()) return false;
-        $msg = new AMQPMessage(json_encode($update));
-        $this->channel->basic_publish($msg, '', $this->queue);
-        return true;
+        if (!$this->reconnectIfNeeded()) return false;
+
+        try {
+            $msg = new AMQPMessage(json_encode($update), ['delivery_mode' => 2]);
+            $this->channel->basic_publish($msg, '', $this->queue);
+            return true;
+        } catch (Exception $e) {
+            LogHandler::error("❌ RabbitMQ push failed: " . $e->getMessage());
+            return false;
+        }
     }
 
     public function pop(): ?array
@@ -44,7 +83,10 @@ class RabbitQueue implements QueueInterface
 
         $msg = $this->channel->basic_get($this->queue);
         if ($msg) {
-            $this->channel->basic_ack($msg->getDeliveryTag());
+            $deliveryTag = $msg->get('delivery_tag');
+            if ($deliveryTag) {
+                $this->channel->basic_ack($deliveryTag);
+            }
             return json_decode($msg->body, true);
         }
 
@@ -53,7 +95,15 @@ class RabbitQueue implements QueueInterface
 
     public function count(): int
     {
-        return 0; // نیاز به اجرای AMQPQueue دارد (اختیاری)
+        if (!$this->reconnectIfNeeded()) return 0;
+
+        try {
+            [$queueName, $messageCount] = $this->channel->queue_declare($this->queue, true);
+            return (int)$messageCount;
+        } catch (Exception $e) {
+            LogHandler::error("⚠️ RabbitMQ count failed: " . $e->getMessage());
+            return 0;
+        }
     }
 
     public function isConnected(): bool
