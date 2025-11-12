@@ -26,7 +26,7 @@ class Core
     private ?PluginHandler $pluginHandler = null;
     private Filesystem $filesystem;
 
-    public function __construct()
+    public function __construct($justUpdates = false)
     {
         LogHandler::info('Bot initializing...');
         $this->filesystem = new Filesystem();
@@ -64,6 +64,9 @@ class Core
         ]);
 
         LogHandler::info('Bot Type: ' . (EnvHandler::get('BOT_MODE') ?? 'unknown'));
+        if ($justUpdates)
+            return;
+
         $pluginsPath = Path::join(APP_BASE_PATH, EnvHandler::get('PLUGINS_DIR', 'plugins'));
         $this->pluginHandler = new PluginHandler($pluginsPath, (int)(EnvHandler::get('PLUGINS_RELOAD_INTERVAL', '60')));
 

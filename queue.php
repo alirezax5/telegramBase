@@ -6,5 +6,5 @@ include './vendor/autoload.php';
 
 
 echo '<pre>';
-$core = new Core();
+$core = new Core(true);
 $core->runFetchQueueUpdate();
