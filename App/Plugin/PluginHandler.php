@@ -164,7 +164,7 @@ class PluginHandler
             $plugin->{$method}($data, $telegram);
         } catch (\Throwable $e) {
             LogHandler::error(
-                "❌ Error executing {$pluginClass}::{$method}",
+                "❌ Error executing {$pluginClass}::{$method} | message: {$e->getMessage()} | line {$e->getLine()}" ,
                 [
                     'error' => $e->getMessage(),
                     'file' => $e->getFile(),
