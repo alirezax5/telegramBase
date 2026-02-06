@@ -18,7 +18,10 @@ class LogHandler
             return;
         }
 
-        if (strtolower(EnvHandler::get('LOG_ENABLED',false) ) !== 'true') {
+        $logEnabled = EnvHandler::get('LOG_ENABLED', false);
+        $logEnabled = filter_var($logEnabled, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+        if ($logEnabled !== true) {
             return;
         }
 
