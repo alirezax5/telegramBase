@@ -26,19 +26,36 @@ class JsonQueue implements QueueInterface
         $filename = uniqid('', true) . '.json';
         $file = Path::join($this->path, $filename);
 
-        $json = json_encode($update, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        try {
+            $json = json_encode(
+                $update,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+            );
+        } catch (\JsonException $exception) {
+            error_log(sprintf('JsonQueue push failed to encode payload: %s', $exception->getMessage()));
+            return false;
+        }
 
         $fp = fopen($file, 'c');
         if (!$fp) return false;
 
+        $written = false;
         if (flock($fp, LOCK_EX)) {
             ftruncate($fp, 0);
-            fwrite($fp, $json);
-            fflush($fp);
+            $bytes = fwrite($fp, $json);
+            $written = $bytes !== false && $bytes === strlen($json);
+            if ($written) {
+                fflush($fp);
+            }
             flock($fp, LOCK_UN);
         }
 
         fclose($fp);
+        if (!$written) {
+            $this->filesystem->remove($file);
+            return false;
+        }
+
         return true;
     }
 
