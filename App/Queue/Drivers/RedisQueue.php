@@ -4,6 +4,7 @@ namespace alirezax5\TelegramBase\App\Queue\Drivers;
 
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Queue\QueueInterface;
+use alirezax5\TelegramBase\App\Connection\ConnectionManager;
 use Redis;
 use Exception;
 
@@ -16,34 +17,11 @@ class RedisQueue implements QueueInterface
     {
         $this->key = $config['key'] ?? 'bot_queue';
 
-        try {
-            $this->redis = new Redis();
+        // استفاده از اتصال مشترک
+        $this->redis = ConnectionManager::getInstance()->getRedis();
 
-            // اتصال
-            if (!$this->redis->connect($config['host'] ?? '127.0.0.1', $config['port'] ?? 6379, 2)) {
-                throw new Exception('Redis connection failed.');
-            }
-
-            // احراز هویت
-            if (!empty($config['password'])) {
-                if (!$this->redis->auth($config['password'])) {
-                    throw new Exception('Redis authentication failed.');
-                }
-            }
-
-            // انتخاب دیتابیس در صورت وجود
-            if (isset($config['database'])) {
-                $this->redis->select((int)$config['database']);
-            }
-
-            // تاخیر کوتاه برای پایداری
-            usleep(200000); // 0.2 ثانیه
-
-            LogHandler::info("✅ Connected to Redis successfully");
-
-        } catch (Exception $e) {
-            LogHandler::error("❌ Redis connection error: " . $e->getMessage());
-            $this->redis = null;
+        if (!$this->redis) {
+            LogHandler::error("❌ RedisQueue: No shared connection available");
         }
     }
 

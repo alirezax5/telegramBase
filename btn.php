@@ -5,6 +5,7 @@ return [
         'keyboard' => [
             [
                 ['text' => __('start')],
+                ['text' => __('start')],
 
             ],
 

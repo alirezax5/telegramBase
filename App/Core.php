@@ -1,261 +1,154 @@
 <?php
 
-declare(strict_types=1);
-
 namespace alirezax5\TelegramBase\App;
 
-use alirezax5\TelegramBase\App\Environment\EnvHandler;
-use alirezax5\TelegramBase\App\Environment\EnvironmentValidator;
-use alirezax5\TelegramBase\App\Logger\LogHandler;
+use alirezax5\TelegramBase\App\Bootstrap\Bootstrap;
+use alirezax5\TelegramBase\App\Bootstrap\PluginsBootstrap;
+use alirezax5\TelegramBase\App\Bootstrap\QueueBootstrap;
+use alirezax5\TelegramBase\App\Bot\BotManager;
+use alirezax5\TelegramBase\App\Config\Config;
+use alirezax5\TelegramBase\App\Update\Processor;
+use alirezax5\TelegramBase\App\Update\Fetcher;
+use alirezax5\TelegramBase\App\Update\PollingLoop;
+use telegramBotApiPhp\Telegram;
+use alirezax5\TelegramBase\App\Enum\CoreMode;
 use alirezax5\TelegramBase\App\Plugin\PluginHandler;
-use alirezax5\TelegramBase\App\Queue\QueueManager;
+use alirezax5\TelegramBase\App\Queue\QueueWorker;
+use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Shared\SharedManagement;
-use telegramBotApiPhp\telegram;
-use Symfony\Component\Filesystem\Filesystem;
-use Symfony\Component\Filesystem\Path;
+use alirezax5\TelegramBase\App\Cron\CronManager;
 
 class Core
 {
-    private Telegram $telegram;
-    private  $updates = [];
-    private EnvironmentValidator $envValidator;
-    private string $appDataFolder;
-    private string $lastUpdateFile;
-    private string $queueJsonDir;
-    private ?QueueManager $queueManager = null;
+    public ?Telegram $Telegram;
     private ?PluginHandler $pluginHandler = null;
-    private Filesystem $filesystem;
+    private CronManager $cronManager;
 
-    public function __construct($justUpdates = false)
+    public function __construct(CoreMode $mode = CoreMode::FULL, ?string $customToken = null)
     {
-        LogHandler::info('Bot initializing...');
-        $this->filesystem = new Filesystem();
+        Bootstrap::boot();
 
-        $this->setupPaths();
-        $this->ensureAppData();
+        $this->initBot($customToken);
+        $this->cronManager = new CronManager();
 
-        $this->envValidator = new EnvironmentValidator();
-        $this->envValidator->validate();
-        LogHandler::info('Environment validated successfully');
-
-        $this->telegram = new Telegram(
-            EnvHandler::get('BOT_TOKEN'),
-            EnvHandler::get('BOT_API_URL'),
-            EnvHandler::get('BOT_API_URL_FILE')
-        );
-
-        $this->queueManager = new QueueManager([
-            'type' => strtolower(EnvHandler::get('QUEUE_SAVE_TYPE', 'json')),
-            'path' => $this->queueJsonDir,
-            'redis' => [
-                'host' => EnvHandler::get('REDIS_HOST', '127.0.0.1'),
-                'port' => (int)EnvHandler::get('REDIS_PORT', 6379),
-                'password' => EnvHandler::get('REDIS_PASSWORD', ''),
-                'key' => EnvHandler::get('QUEUE_REDIS_KEY', 'bot_updates')
-            ],
-            'rabbitmq' => [
-                'host' => EnvHandler::get('RABBITMQ_HOST', '127.0.0.1'),
-                'port' => (int)EnvHandler::get('RABBITMQ_PORT', 5672),
-                'user' => EnvHandler::get('RABBITMQ_USER', 'guest'),
-                'password' => EnvHandler::get('RABBITMQ_PASSWORD', 'guest'),
-                'queue' => EnvHandler::get('RABBITMQ_QUEUE', 'bot_updates')
-            ],
-
-        ]);
-
-        LogHandler::info('Bot Type: ' . (EnvHandler::get('BOT_MODE') ?? 'unknown'));
-        if ($justUpdates)
-            return;
-
-        $pluginsPath = Path::join(APP_BASE_PATH, EnvHandler::get('PLUGINS_DIR', 'plugins'));
-        $this->pluginHandler = new PluginHandler($pluginsPath, (int)(EnvHandler::get('PLUGINS_RELOAD_INTERVAL', '60')));
-
-        if ($this->getBotMode() === 'update') {
-            $this->handleUpdates();
+        if ($mode === CoreMode::FULL) {
+            PluginsBootstrap::boot();
+            $this->pluginHandler = PluginsBootstrap::$plugins;
         }
     }
 
-    // ------------------------------------------
-    // مسیرها و آماده‌سازی پوشه‌ها
-    // ------------------------------------------
-    private function setupPaths(): void
+    private function initBot(?string $customToken = null): void
     {
-        $this->appDataFolder = Path::join(APP_BASE_PATH, EnvHandler::get('DATA_DIR', 'AppData'));
-        $this->lastUpdateFile = Path::join($this->appDataFolder, EnvHandler::get('POLLING_STATE_FILE', 'lastupdate.txt'));
-        $this->queueJsonDir = Path::join($this->appDataFolder, 'updates');
-    }
-
-    private function ensureAppData(): void
-    {
-        foreach ([$this->appDataFolder, $this->queueJsonDir] as $dir) {
-            if (!$this->filesystem->exists($dir)) {
-                $this->filesystem->mkdir($dir, 0777);
-                LogHandler::info("Created folder: {$dir}");
-            }
+        if ($customToken !== null) {
+            BotManager::getInstance()->setDefaultToken($customToken);
         }
 
-        if (!$this->filesystem->exists($this->lastUpdateFile)) {
-            $this->filesystem->dumpFile($this->lastUpdateFile, '');
-            LogHandler::info("Created file: {$this->lastUpdateFile}");
-        }
+        $this->Telegram = BotManager::getInstance()->get();
     }
 
-    // ------------------------------------------
-    // حالت ربات
-    // ------------------------------------------
-    private function getBotMode(): string
+    public function bot(?string $name = null): Telegram
     {
-        return EnvHandler::get('BOT_MODE', 'webhook');
-    }
-
-    private function getUpdateMode(): string
-    {
-        return EnvHandler::get('UPDATE_MODE', 'normal');
-    }
-
-    // ------------------------------------------
-    // دریافت آپدیت‌ها
-    // ------------------------------------------
-    private function handleUpdates(): void
-    {
-        $offset = (int)$this->getLastUpdateValue();
-        $limit = (int)(EnvHandler::get('POLLING_LIMIT', 50));
-        $allowedUpdates = $this->getAllowedUpdates();
-
-        $updatesResponse = $this->telegram->getUpdates($offset, $limit, 30, $allowedUpdates);
-
-        if (($updatesResponse?->ok ?? false) && !empty($updatesResponse?->result)) {
-            $this->updates = $updatesResponse->result;
-            LogHandler::info("Fetched " . count($this->updates) . " updates successfully");
-        }
-    }
-
-    private function getAllowedUpdates(): ?array
-    {
-        $allowed = EnvHandler::get('ALLOWED_UPDATES', 'all');
-        return $allowed === 'all' ? null : array_map('trim', explode(',', $allowed));
-    }
-
-    // ------------------------------------------
-    // فایل آخرین آپدیتش
-    // ------------------------------------------
-    private function updateLastUpdateFile(string|int $value): bool
-    {
-        $this->filesystem->dumpFile($this->lastUpdateFile, (string)$value);
-        return true;
-    }
-
-    private function getLastUpdateValue(): string
-    {
-        if (!$this->filesystem->exists($this->lastUpdateFile)) {
-            return '0';
-        }
-
-        return trim((string)file_get_contents($this->lastUpdateFile));
-    }
-
-    // ------------------------------------------
-    // مدیریت Worker و Queue
-    // ------------------------------------------
-    private function startWorkerLoop(int $workerId): void
-    {
-        $queue = $this->queueManager;
-
-        while (true) {
-            if (!$queue->getDriver()->isConnected()) {
-                LogHandler::warning("Worker #{$workerId}: Queue connection lost. Retrying...");
-                sleep(1);
-                continue;
-            }
-
-            $update = $queue->pop();
-
-            if ($update) {
-                $this->telegram->setInputData($update);
-                $this->pluginHandler->runAll($update, $this->telegram);
-            } else {
-                usleep(100000);
-            }
-        }
-    }
-
-
-    // ------------------------------------------
-    // ذخیره در Queue
-    // ------------------------------------------
-    private function saveToQueue(array $update): void
-    {
-        $queue = $this->queueManager;
-        if (!$queue->getDriver()->isConnected()) {
-            LogHandler::error("Queue connection lost. Cannot save update.");
-            return;
-        }
-
-        $queue->push($update);
-        LogHandler::info("Queued update successfully via ");
-    }
-
-    // ------------------------------------------
-    // اجرای Worker
-    // ------------------------------------------
-    private function runQueueProcessor(): void
-    {
-
-
-        LogHandler::info("Queue Processor started");
-
-        $this->startWorkerLoop(0);
-
-    }
-
-    // ------------------------------------------
-    // اجرای نهایی
-    // ------------------------------------------
-    public function runFetchQueueUpdate(): void
-    {
-        if ($this->getBotMode() === 'webhook') {
-            $this->saveToQueue($this->telegram->getInputData());
-        } else {
-            foreach ($this->updates as $update) {
-                $this->saveToQueue($update->toArray());
-//                $this->pluginHandler->runAll($update->toArray(), $this->telegram);
-                $this->updateLastUpdateFile($update->update_id + 1);
-            }
-        }
+        return BotManager::getInstance()->get($name);
     }
 
     public function run(): void
     {
-        $updateMode = $this->getUpdateMode();
+        try {
 
-        if ($updateMode === 'normal') {
-            if ($this->getBotMode() === 'update') {
-                $this->runUpdateMode();
-            } else {
-                $this->runWebhookMode();
+            switch (Config::bot()->mode) {
+
+                case 'update_queue':
+                case 'webhook_queue':
+                    $this->queueWorker()->startInfinite();
+                    break;
+
+                case 'webhook_direct':
+                    $this->processor()->handleWebhook();
+                    $this->cleanup();
+                    break;
+
+                case 'cronjob_update':
+                    $this->cronManager->run(
+                        1,
+                        fn() => $this->pollingLoop()->start()
+                    );
+                    break;
+
+                case 'cronjob_queue':
+                    $this->cronManager->run(
+                        Config::cron()->cronWorker,
+                        fn() => $this->queueWorker()->startInfinite()
+                    );
+                    break;
+
+                default:
+                    $this->pollingLoop()->start();
             }
-        } elseif ($updateMode === 'queue') {
-            $this->runQueueProcessor();
-        } else {
-            LogHandler::warning("Unknown update mode: {$updateMode}");
+
+        } catch (\Throwable $e) {
+
+            LogHandler::error(
+                'Runtime error: ' . $e->getMessage()
+            );
+        }
+    }
+
+    public function runFetchQueueUpdate(): void
+    {
+        if (Config::bot()->mode === 'webhook_queue') {
+
+            $input = $this->Telegram->getInputData();
+
+            if ($input) {
+                QueueBootstrap::$queue?->push($input);
+            }
+
+            $this->cleanup();
+
+            return;
         }
 
+        $fetcher = new Fetcher($this->Telegram);
+
+        foreach ($fetcher->fetch() as $update) {
+
+            if (QueueBootstrap::$queue?->push($update)) {
+
+                $fetcher->updateLastId(
+                    $update->update_id + 1
+                );
+            }
+        }
+
+        $this->cleanup();
+    }
+
+    private function cleanup(): void
+    {
         SharedManagement::clear();
-        LogHandler::info('Execution completed and shared memory cleared.');
+    }
+    private function processor(): Processor
+    {
+        return new Processor(
+            $this->pluginHandler,
+            $this->Telegram
+        );
     }
 
-
-    private function runUpdateMode(): void
+    private function pollingLoop(): PollingLoop
     {
-        foreach ($this->updates as $update) {
-            $this->telegram->setInputData($update->toArray());
-            $this->pluginHandler->runAll($update->toArray(), $this->telegram);
-            $this->updateLastUpdateFile($update->update_id + 1);
-        }
+        return new PollingLoop(
+            new Fetcher($this->Telegram),
+            $this->processor()
+        );
     }
 
-    private function runWebhookMode(): void
+    private function queueWorker(): QueueWorker
     {
-        $this->pluginHandler->runAll($this->telegram->getInputData(), $this->telegram);
+        return new QueueWorker(
+            QueueBootstrap::$queue,
+            $this->pluginHandler,
+            $this->Telegram
+        );
     }
 }

@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace alirezax5\TelegramBase\App\Plugin;
 
+use alirezax5\TelegramBase\App\Config\Config;
 use alirezax5\TelegramBase\App\Logger\LogHandler;
-use alirezax5\TelegramBase\App\Plugin\PluginBase;
-use ReflectionClass;
+use alirezax5\TelegramBase\App\Cache\CacheManager;
+use alirezax5\TelegramBase\App\Environment\EnvHandler;
+use alirezax5\TelegramBase\App\Paths;
+use alirezax5\TelegramBase\App\Plugin\Contract\PluginInterface;
 use telegramBotApiPhp\Telegram;
+use ReflectionClass;
 
 class PluginHandler
 {
@@ -15,166 +19,290 @@ class PluginHandler
         'message', 'edited_message', 'channel_post', 'edited_channel_post',
         'business_connection', 'business_message', 'edited_business_message',
         'deleted_business_messages', 'message_reaction', 'message_reaction_count',
-        'inline_query', 'chosen_inline_result', 'callback_query', 'shipping_query',
-        'pre_checkout_query', 'purchased_paid_media', 'poll', 'poll_answer',
-        'my_chat_member', 'chat_member', 'chat_join_request', 'chat_boost', 'removed_chat_boost',
+        'inline_query', 'chosen_inline_result', 'callback_query',
+        'shipping_query', 'pre_checkout_query', 'purchased_paid_media',
+        'poll', 'poll_answer', 'my_chat_member', 'chat_member',
+        'chat_join_request', 'chat_boost', 'removed_chat_boost',
     ];
 
-    /** @var PluginBase[] */
+    private const CACHE_KEY_PLUGINS = 'plugin_handler:plugins_index';
+    private const CACHE_KEY_METHODS = 'plugin_handler:method_cache';
+
+    /** @var array<string, array<int, PluginInterface>> */
     private array $plugins = [];
+
     private ?string $pluginsDir = null;
     private int $lastReloadTime = 0;
     private int $reloadInterval;
+    private bool $enableCache;
+    private int $cacheTtl;
 
-    public function __construct(string $pluginsPath, int $reloadInterval = 60)
-    {
-        $this->reloadInterval = $reloadInterval;
+    /** @var array<string,string> */
+    private array $methodCache = [];
+
+    /** @var array<string,true> */
+    private array $updateTypesFlip = [];
+
+    /** @var array<string,string> */
+    private array $fileHashes = [];
+
+    public function __construct(
+
+    ) {
+        $this->reloadInterval = Config::plugins()->reloadInterval;
+        $this->enableCache = (bool) Config::plugins()->cacheEnabled;
+        $pluginsPath = Config::plugins()->path;
+
+        $this->enableCache = $enableCache
+            ?? (bool) EnvHandler::get('PLUGIN_CACHE_ENABLED', true);
+
+        $this->cacheTtl = (int) EnvHandler::get('PLUGIN_CACHE_TTL', 300);
+
+        $this->updateTypesFlip = array_fill_keys(self::UPDATE_TYPES, true);
 
         if (!is_dir($pluginsPath)) {
-            LogHandler::error("❌ Plugins directory does not exist: {$pluginsPath}");
-        } else {
-            $this->pluginsDir = realpath($pluginsPath);
-            LogHandler::info("📁 Plugins directory set: {$this->pluginsDir}");
+            LogHandler::error("❌ Plugins directory not found: {$pluginsPath}");
+            return;
         }
+        $this->pluginsDir = realpath($pluginsPath) ?: $pluginsPath;
+
+
+        LogHandler::info("📁 Plugins dir: {$this->pluginsDir}");
 
         $this->loadPlugins();
     }
 
     public function loadPlugins(): void
     {
-        if ($this->pluginsDir === null) {
-            LogHandler::warning("⚠️ Plugin directory not set, skipping plugin loading.");
+        if (!$this->pluginsDir) {
+            return;
+        }
+        if ($this->enableCache && CacheManager::isInitialized()) {
+            if ($this->loadFromCache()) {
+                $this->lastReloadTime = time();
+                LogHandler::debug("⚡ Plugins loaded from cache");
+                return;
+            }
+        }
+
+        $this->loadFromFiles();
+    }
+    private function getPluginFiles(): array
+    {
+        $files = [];
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator(
+                $this->pluginsDir,
+                \FilesystemIterator::SKIP_DOTS
+            )
+        );
+
+        foreach ($iterator as $file) {
+            if ($file->isFile() && $file->getExtension() === 'php') {
+                $files[] = $file->getPathname();
+            }
+        }
+
+        return $files;
+    }
+    private function pathToClass(string $file): string
+    {
+        $relative = str_replace($this->pluginsDir, '', $file);
+        $relative = trim($relative, DIRECTORY_SEPARATOR);
+        $relative = str_replace('.php', '', $relative);
+
+        return '\\alirezax5\\TelegramBase\\Plugin\\' .
+            str_replace(DIRECTORY_SEPARATOR, '\\', $relative);
+    }
+    private function loadFromFiles(): void
+    {
+        LogHandler::info("🔄 Scanning plugins...");
+
+        $files = $this->getPluginFiles();
+
+        $this->plugins = [];
+        $this->methodCache = [];
+        $this->fileHashes = [];
+
+        if (!$files) {
+            LogHandler::warning("⚠️ No plugin files found");
             return;
         }
 
-        LogHandler::info("🔄 Scanning plugin directory: {$this->pluginsDir}");
+        $loaded = 0;
+        $skipped = 0;
 
-        $pluginFiles = glob($this->pluginsDir . '/*.php') ?: [];
-        $this->plugins = [];
+        foreach ($files as $file) {
+            try {
+                require_once $file;
 
-        if (empty($pluginFiles)) {
-            LogHandler::warning("⚠️ No plugin files found in directory.");
+                $fqcn = $this->pathToClass($file);
+
+                if (!class_exists($fqcn)) {
+                    $skipped++;
+                    continue;
+                }
+
+                $ref = new \ReflectionClass($fqcn);
+
+                if (
+                    !$ref->isInstantiable() ||
+                    !$ref->isSubclassOf(PluginInterface::class)
+                ) {
+                    $skipped++;
+                    continue;
+                }
+
+                /** @var PluginInterface $plugin */
+                $plugin = $ref->newInstance();
+
+                $this->indexPlugin($plugin, $ref);
+
+                $this->fileHashes[$fqcn] = (string) filemtime($file);
+
+                $loaded++;
+
+                LogHandler::debug("✔ loaded {$fqcn}");
+            } catch (\Throwable $e) {
+                $skipped++;
+                LogHandler::error("Plugin load error: {$file} | {$e->getMessage()}");
+            }
         }
 
-        foreach ($pluginFiles as $file) {
-            $className = pathinfo($file, PATHINFO_FILENAME);
-            $fullClassName = "\\alirezax5\\TelegramBase\\Plugin\\{$className}";
-
-            require_once $file;
-
-            if (!class_exists($fullClassName)) {
-                LogHandler::warning("⚠️ Plugin class not found: {$fullClassName}", ['file' => $file]);
-                continue;
-            }
-
-            $reflection = new ReflectionClass($fullClassName);
-
-            if (!$reflection->isInstantiable() || !$reflection->isSubclassOf(PluginBase::class)) {
-                LogHandler::warning("⛔ Invalid plugin (must extend PluginBase): {$fullClassName}");
-                continue;
-            }
-
-            $plugin = $reflection->newInstance();
-            $this->plugins[] = $plugin;
-
-            LogHandler::info("✅ Plugin loaded: {$fullClassName}");
+        foreach ($this->plugins as &$group) {
+            usort($group, fn($a, $b) => $a->getPriority() <=> $b->getPriority());
         }
 
-        usort($this->plugins, fn(PluginBase $a, PluginBase $b) => $a->getPriority() <=> $b->getPriority());
-
-        LogHandler::info("✅ Total plugins loaded: " . count($this->plugins));
+        $this->saveToCache();
         $this->lastReloadTime = time();
+
+        LogHandler::info("✅ Plugins: {$loaded} loaded, {$skipped} skipped");
     }
 
-    public function runAll(array $update, Telegram $telegram): void
+    private function indexPlugin(PluginInterface $plugin, ReflectionClass $ref): void
+    {
+        foreach ($ref->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
+            $name = $method->getName();
+
+            if (str_starts_with($name, 'on') || $name === 'before' || $name === 'after') {
+                $this->plugins[$name][] = $plugin;
+            }
+        }
+    }
+
+    private function loadFromCache(): bool
+    {
+        $cached = CacheManager::get(self::CACHE_KEY_PLUGINS);
+
+        if (!is_array($cached) || !isset($cached['plugins'], $cached['hashes'])) {
+            return false;
+        }
+
+        // validate
+        foreach (glob($this->pluginsDir . '/*.php') ?: [] as $file) {
+            $class = pathinfo($file, PATHINFO_FILENAME);
+            $fqcn = "\\alirezax5\\TelegramBase\\Plugin\\{$class}";
+
+            $hash = (string) filemtime($file);
+
+            if (($cached['hashes'][$fqcn] ?? null) !== $hash) {
+                LogHandler::info("🔄 Plugin change detected → cache invalid");
+                return false;
+            }
+        }
+
+        $this->plugins = $cached['plugins'];
+        $this->methodCache = CacheManager::get(self::CACHE_KEY_METHODS) ?: [];
+
+        return true;
+    }
+
+    private function saveToCache(): void
+    {
+        if (!$this->enableCache || !CacheManager::isInitialized()) {
+            return;
+        }
+
+        CacheManager::put(self::CACHE_KEY_PLUGINS, [
+            'plugins' => $this->plugins,
+            'hashes' => $this->fileHashes,
+            'time' => time(),
+        ], $this->cacheTtl);
+
+        CacheManager::put(self::CACHE_KEY_METHODS, $this->methodCache, $this->cacheTtl);
+
+        LogHandler::debug("💾 plugin cache saved");
+    }
+
+    public function runAll( $update, Telegram $Telegram): void
     {
         if (time() - $this->lastReloadTime > $this->reloadInterval) {
-            LogHandler::info("🔁 Reloading plugins after {$this->reloadInterval}s...");
             $this->loadPlugins();
         }
 
-        $updateType = $this->detectUpdateType($update);
-        if ($updateType === null) {
-            LogHandler::debug("⚪ Update type not recognized, skipping.");
+        $type = $this->detectType($update);
+
+        if (!$type) {
             return;
         }
 
-        LogHandler::info("📥 Update received: {$updateType}");
+        $method = $this->methodCache[$type]
+            ??= 'on' . str_replace(' ', '', ucwords(str_replace('_', ' ', $type)));
 
-        $handlerMethod = $this->buildHandlerMethod($updateType);
-        LogHandler::debug("🔧 Handler resolved: {$handlerMethod}");
+        $data = $update->$type ?? null;
 
-        $updateData = $this->convertToObject($update[$updateType]);
-        LogHandler::debug("📦 Update data converted to object");
-
-        foreach ($this->plugins as $plugin) {
-            $pluginClass = get_class($plugin);
-            LogHandler::info("🚀 Running plugin: " . $pluginClass);
-
-            $this->executePluginMethod($plugin, 'before', $updateData, $telegram);
-            $this->executePluginMethod($plugin, $handlerMethod, $updateData, $telegram);
-            $this->executePluginMethod($plugin, 'after', $updateData, $telegram);
-
-            LogHandler::info("✅ Completed plugin: " . $pluginClass);
-        }
+        $this->run('before', $data, $Telegram);
+        $this->run($method, $data, $Telegram);
+        $this->run('after', $data, $Telegram);
     }
 
-    private function detectUpdateType(array $update): ?string
+    private function detectType( $update): ?string
     {
-        foreach (self::UPDATE_TYPES as $type) {
-            if (isset($update[$type])) {
-                LogHandler::debug("🔍 Detected update type: {$type}");
-                return $type;
+
+        foreach ($update as $key => $_) {
+            if (isset($this->updateTypesFlip[$key])) {
+                return $key;
             }
         }
-
-        LogHandler::debug("❓ No matching update type detected.");
         return null;
     }
 
-    private function buildHandlerMethod(string $type): string
+    private function run(string $method, object $data, Telegram $Telegram): void
     {
-        $method = 'on' . str_replace(' ', '', ucwords(str_replace('_', ' ', $type)));
-        LogHandler::debug("🛠 Building handler method: {$method}");
-        return $method;
+        foreach ($this->plugins[$method] ?? [] as $plugin) {
+            try {
+                $plugin->{$method}($data, $Telegram);
+            } catch (\Throwable $e) {
+                LogHandler::error("Plugin error {$method}: " . $e->getMessage());
+            }
+        }
     }
 
-    private function convertToObject(mixed $data): object
+    public function clearPluginCache(): void
     {
-        return json_decode(json_encode($data), false);
-    }
-
-    private function executePluginMethod(PluginBase $plugin, string $method, object $data, Telegram $telegram): void
-    {
-        $pluginClass = get_class($plugin);
-
-        if (!method_exists($plugin, $method)) {
-            LogHandler::debug("⏭ Method not found: {$pluginClass}::{$method}");
+        if (!CacheManager::isInitialized()) {
             return;
         }
 
-        $start = microtime(true);
+        CacheManager::forget(self::CACHE_KEY_PLUGINS);
+        CacheManager::forget(self::CACHE_KEY_METHODS);
 
-        LogHandler::info(
-            "▶️ Executing {$pluginClass}::{$method}",
-            ['plugin' => $pluginClass, 'method' => $method]
-        );
+        LogHandler::info("🧹 plugin cache cleared");
+    }
 
-        try {
-            $plugin->{$method}($data, $telegram);
-        } catch (\Throwable $e) {
-            LogHandler::error(
-                "❌ Error executing {$pluginClass}::{$method} | message: {$e->getMessage()} | line {$e->getLine()}" ,
-                [
-                    'error' => $e->getMessage(),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                    'trace' => $e->getTraceAsString()
-                ]
-            );
-        } finally {
-            $duration = round((microtime(true) - $start) * 1000, 2);
-            LogHandler::debug("⏱ Execution time {$pluginClass}::{$method} ({$duration} ms)");
-        }
+    public function reload(): void
+    {
+        $this->clearPluginCache();
+        $this->loadPlugins();
+    }
+
+    public function getStats(): array
+    {
+        return [
+            'plugins' => count(array_unique(array_merge(...array_map('array_map', $this->plugins)))),
+            'handlers' => array_sum(array_map('count', $this->plugins)),
+            'events' => array_keys($this->plugins),
+        ];
     }
 }

@@ -1,19 +1,18 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Queue\Drivers;
 
 use alirezax5\TelegramBase\App\Queue\QueueInterface;
 use alirezax5\TelegramBase\App\Logger\LogHandler;
-use PhpAmqpLib\Connection\AMQPStreamConnection;
+use alirezax5\TelegramBase\App\Connection\ConnectionManager;
 use PhpAmqpLib\Message\AMQPMessage;
-use PhpAmqpLib\Exception\AMQPIOException;
-use PhpAmqpLib\Exception\AMQPConnectionClosedException;
-use Exception;
+use Throwable;
 
 class RabbitQueue implements QueueInterface
 {
-    protected ?AMQPStreamConnection $connection = null;
-    protected $channel;
+    protected $channel = null;
     protected string $queue;
     protected array $config;
 
@@ -22,45 +21,54 @@ class RabbitQueue implements QueueInterface
         $this->config = $config;
         $this->queue = $config['queue'] ?? 'bot_queue';
 
-        $this->connect();
+        $this->initChannel();
     }
 
-    private function connect(): void
+    private function initChannel(): void
     {
-        try {
-            $this->connection = new AMQPStreamConnection(
-                $this->config['host'] ?? '127.0.0.1',
-                $this->config['port'] ?? 5672,
-                $this->config['user'] ?? 'guest',
-                $this->config['password'] ?? 'guest',
-                $this->config['vhost'] ?? '/' // ✅ اضافه شده
-            );
+        $connection = ConnectionManager::getInstance()->getRabbitMQ();
 
-            $this->channel = $this->connection->channel();
+        if (!$connection || !$connection->isConnected()) {
+            LogHandler::error("❌ RabbitMQQueue: no connection");
+            $this->channel = null;
+            return;
+        }
+
+        try {
+            $this->channel = $connection->channel();
+
             $this->channel->queue_declare(
                 $this->queue,
-                false,  // passive
-                true,   // durable
-                false,  // exclusive
-                false   // auto-delete
+                false,
+                true,
+                false,
+                false
             );
 
-            LogHandler::info("✅ Connected to RabbitMQ queue '{$this->queue}'");
+            LogHandler::info("✅ RabbitMQ ready: {$this->queue}");
 
-        } catch (Exception $e) {
-            $this->connection = null;
-            LogHandler::error("❌ RabbitMQ connection failed: " . $e->getMessage());
+        } catch (Throwable $e) {
+            LogHandler::error("❌ RabbitMQ init failed: {$e->getMessage()}");
+            $this->channel = null;
         }
     }
 
     private function reconnectIfNeeded(): bool
     {
-        if (!$this->isConnected()) {
-            LogHandler::warning("🔄 Reconnecting to RabbitMQ...");
-            $this->connect();
+        try {
+            if (
+                $this->channel === null ||
+                !$this->channel->getConnection() ||
+                !$this->channel->getConnection()->isConnected()
+            ) {
+                LogHandler::warning("🔄 RabbitMQ reconnect...");
+                $this->initChannel();
+            }
+        } catch (Throwable $e) {
+            $this->channel = null;
         }
 
-        return $this->isConnected();
+        return $this->channel !== null;
     }
 
     public function push(array $update): bool
@@ -68,29 +76,56 @@ class RabbitQueue implements QueueInterface
         if (!$this->reconnectIfNeeded()) return false;
 
         try {
-            $msg = new AMQPMessage(json_encode($update), ['delivery_mode' => 2]);
+            $payload = json_encode(
+                $update,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            );
+
+            if ($payload === false) {
+                return false;
+            }
+
+            $msg = new AMQPMessage($payload, [
+                'delivery_mode' => 2
+            ]);
+
             $this->channel->basic_publish($msg, '', $this->queue);
+
             return true;
-        } catch (Exception $e) {
-            LogHandler::error("❌ RabbitMQ push failed: " . $e->getMessage());
+
+        } catch (Throwable $e) {
+            LogHandler::error("❌ RabbitMQ push failed: {$e->getMessage()}");
             return false;
         }
     }
 
     public function pop(): ?array
     {
-        if (!$this->isConnected()) return null;
+        if (!$this->reconnectIfNeeded()) return null;
 
-        $msg = $this->channel->basic_get($this->queue);
-        if ($msg) {
-            $deliveryTag = $msg->get('delivery_tag');
-            if ($deliveryTag) {
-                $this->channel->basic_ack($deliveryTag);
+        try {
+            $msg = $this->channel->basic_get($this->queue);
+
+            if (!$msg) {
+                return null;
             }
-            return json_decode($msg->body, true);
-        }
 
-        return null;
+            $data = json_decode($msg->body, true);
+
+            if (!is_array($data)) {
+                // invalid message → still ack to avoid poison loop
+                $this->channel->basic_ack($msg->getDeliveryTag());
+                return null;
+            }
+
+            $this->channel->basic_ack($msg->getDeliveryTag());
+
+            return $data;
+
+        } catch (Throwable $e) {
+            LogHandler::error("❌ RabbitMQ pop failed: {$e->getMessage()}");
+            return null;
+        }
     }
 
     public function count(): int
@@ -98,16 +133,30 @@ class RabbitQueue implements QueueInterface
         if (!$this->reconnectIfNeeded()) return 0;
 
         try {
-            [$queueName, $messageCount] = $this->channel->queue_declare($this->queue, true);
-            return (int)$messageCount;
-        } catch (Exception $e) {
-            LogHandler::error("⚠️ RabbitMQ count failed: " . $e->getMessage());
+            $result = $this->channel->queue_declare(
+                $this->queue,
+                true,
+                true,
+                false,
+                false
+            );
+
+            return (int)($result[1] ?? 0);
+
+        } catch (Throwable $e) {
+            LogHandler::warning("⚠️ RabbitMQ count failed: {$e->getMessage()}");
             return 0;
         }
     }
 
     public function isConnected(): bool
     {
-        return $this->connection && $this->connection->isConnected();
+        try {
+            return $this->channel !== null
+                && $this->channel->getConnection()
+                && $this->channel->getConnection()->isConnected();
+        } catch (Throwable) {
+            return false;
+        }
     }
 }

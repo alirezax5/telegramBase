@@ -1,71 +1,41 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Environment;
+
+use InvalidArgumentException;
 
 class EnvironmentValidator
 {
-
     public function validate(): void
     {
-        $this->validateTelegramBotToken();
-        $this->validateTelegramApiUrl();
-        $this->validateBotType();
+        $this->require('BOT_TOKEN', fn($v) =>
+        preg_match('/^\d+:[\w-]+$/', $v)
+            , "Invalid BOT_TOKEN format");
+
+        $this->require('BOT_API_URL', fn($v) =>
+            filter_var($v, FILTER_VALIDATE_URL) !== false
+            , "BOT_API_URL is not valid URL");
+
+        $this->require('BOT_MODE', fn($v) =>
+        in_array($v, ['update', 'webhook'], true)
+            , "BOT_MODE must be: update | webhook");
     }
 
-
-    private function validateTelegramBotToken(): void
+    /**
+     * Generic validator helper
+     */
+    private function require(string $key, callable $rule, string $error): void
     {
-        if (!isset($_ENV['BOT_TOKEN']))
-            throw new \InvalidArgumentException("BOT_TOKEN is not set in environment variables.");
+        $value = EnvHandler::get($key);
 
-
-        $token = $_ENV['BOT_TOKEN'];
-
-        if ($token === '')
-            throw new \InvalidArgumentException("BOT_TOKEN cannot be empty.");
-
-
-        if (!preg_match('/^\d+:[\w-]+$/', $token))
-            throw new \InvalidArgumentException("BOT_TOKEN has invalid format.");
-
-    }
-
-    private function validateTelegramApiUrl(): void
-    {
-        if (!isset($_ENV['BOT_API_URL']))
-            throw new \InvalidArgumentException("BOT_API_URL is not set in environment variables.");
-
-
-        $url = $_ENV['BOT_API_URL'];
-
-        if ($url === '') {
-            throw new \InvalidArgumentException("BOT_API_URL cannot be empty.");
+        if ($value === null || $value === '') {
+            throw new InvalidArgumentException("{$key} is not set or empty.");
         }
 
-
-        if (filter_var($url, FILTER_VALIDATE_URL) === false)
-            throw new \InvalidArgumentException("BOT_API_URL is not a valid URL.");
-
+        if (!$rule($value)) {
+            throw new InvalidArgumentException("{$error}: {$value}");
+        }
     }
-
-
-    private function validateBotType(): void
-    {
-        if (!isset($_ENV['BOT_MODE']))
-            throw new \InvalidArgumentException("BOT_MODE is not set in environment variables.");
-
-
-        $botType = $_ENV['BOT_MODE'];
-
-        if ($botType === '')
-            throw new \InvalidArgumentException("BOT_MODE cannot be empty.");
-
-
-        if ($botType !== 'update' && $botType !== 'webhook')
-            throw new \InvalidArgumentException(
-                "Invalid BOT_MODE: '{$botType}'. Allowed values: 'update', 'webhook'"
-            );
-
-    }
-
 }

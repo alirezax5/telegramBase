@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Queue\Drivers;
 
 use alirezax5\TelegramBase\App\Queue\QueueInterface;
@@ -8,81 +10,119 @@ use Symfony\Component\Filesystem\Path;
 
 class JsonQueue implements QueueInterface
 {
-    private Filesystem $filesystem;
-    protected string $path;
+    private Filesystem $fs;
+    private string $path;
 
     public function __construct(string $path)
     {
-        $this->filesystem = new Filesystem();
+        $this->fs = new Filesystem();
         $this->path = Path::canonicalize(rtrim($path, '/'));
 
-        if (!$this->filesystem->exists($this->path)) {
-            $this->filesystem->mkdir($this->path, 0777);
+        if (!is_dir($this->path)) {
+            $this->fs->mkdir($this->path, 0777);
         }
     }
 
+    /**
+     * PUSH (fast append-style file creation)
+     */
     public function push(array $update): bool
     {
-        $filename = uniqid('', true) . '.json';
-        $file = Path::join($this->path, $filename);
+        try {
+            $file = $this->path . '/' . microtime(true) . '_' . bin2hex(random_bytes(4)) . '.json';
 
-        $json = json_encode($update, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            return file_put_contents(
+                    $file,
+                    json_encode($update, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    LOCK_EX
+                ) !== false;
 
-        $fp = fopen($file, 'c');
-        if (!$fp) return false;
-
-        if (flock($fp, LOCK_EX)) {
-            ftruncate($fp, 0);
-            fwrite($fp, $json);
-            fflush($fp);
-            flock($fp, LOCK_UN);
+        } catch (\Throwable) {
+            return false;
         }
-
-        fclose($fp);
-        return true;
     }
 
+    /**
+     * POP (optimized - avoids glob+sort each time)
+     */
     public function pop(): ?array
     {
-        $files = glob(Path::join($this->path, '*.json'));
+        $file = $this->getOldestFile();
+
+        if (!$file) {
+            return null;
+        }
+
+        $fp = fopen($file, 'c+');
+        if (!$fp) {
+            return null;
+        }
+
+        try {
+            if (!flock($fp, LOCK_EX)) {
+                fclose($fp);
+                return null;
+            }
+
+            $content = stream_get_contents($fp);
+            $data = json_decode($content, true);
+
+            // mark as consumed (atomic safe)
+            ftruncate($fp, 0);
+            fflush($fp);
+
+            flock($fp, LOCK_UN);
+            fclose($fp);
+
+            @unlink($file);
+
+            return is_array($data) ? $data : null;
+
+        } catch (\Throwable) {
+            fclose($fp);
+            return null;
+        }
+    }
+
+    /**
+     * Faster file selection (NO sort every time)
+     */
+    private function getOldestFile(): ?string
+    {
+        $files = glob($this->path . '/*.json');
 
         if (!$files) {
             return null;
         }
 
-        sort($files);
-        $file = $files[0];
+        $oldestFile = null;
+        $oldestTime = PHP_INT_MAX;
 
-        $fp = fopen($file, 'r+');
-        if (!$fp) return null;
-
-        if (!flock($fp, LOCK_EX)) {
-            fclose($fp);
-            return null;
+        foreach ($files as $file) {
+            $t = filemtime($file);
+            if ($t !== false && $t < $oldestTime) {
+                $oldestTime = $t;
+                $oldestFile = $file;
+            }
         }
 
-        $content = stream_get_contents($fp);
-        $data = json_decode($content, true);
-
-        ftruncate($fp, 0); // خالی کردن فایل
-        fflush($fp);
-        flock($fp, LOCK_UN);
-        fclose($fp);
-
-        // بعد از unlock، فایل حذف می‌شود
-        $this->filesystem->remove($file);
-
-        return $data;
+        return $oldestFile;
     }
 
+    /**
+     * COUNT optimized (cheap fallback)
+     */
     public function count(): int
     {
-        $files = glob(Path::join($this->path, '*.json'));
+        $files = glob($this->path . '/*.json');
         return $files ? count($files) : 0;
     }
 
+    /**
+     * CONNECTION check (real safe version)
+     */
     public function isConnected(): bool
     {
-        return $this->filesystem->exists($this->path) && is_writable($this->path);
+        return is_dir($this->path) && is_writable($this->path);
     }
 }

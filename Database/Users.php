@@ -15,6 +15,7 @@ class Users extends Model
         'status' => 'boolean'
     ];
     public $timestamps = false;
+    protected $connection = 'main';
 
     public static function checkAndInsert(int $chatid): bool
     {
@@ -31,12 +32,13 @@ class Users extends Model
         $query = self::where('status', true)->orderBy('id');
         return $limit ? $query->paginate($per, ['*'], 'page', $page) : $query->get();
     }
-    public static function getAllStatusActiveUserByLang($lang = 'all',bool $limit = true, int $page = 1, int $per = 20)
+
+    public static function getAllStatusActiveUserByLang($lang = 'all', bool $limit = true, int $page = 1, int $per = 20)
     {
         if ($lang == 'all')
-        $query = self::where('status', true)->orderBy('id');
+            $query = self::where('status', true)->orderBy('id');
         else
-           $query = self::where('status', true)->where('lang', $lang)->orderBy('id');
+            $query = self::where('status', true)->where('lang', $lang)->orderBy('id');
 
         return $limit ? $query->paginate($per, ['*'], 'page', $page) : $query->get();
     }
@@ -84,7 +86,6 @@ class Users extends Model
     }
 
 
-
     public static function getCountAdmin(): int
     {
         return self::getCountByField('role', 'admin');
@@ -112,7 +113,6 @@ class Users extends Model
     }
 
 
-
     public static function updateFieldByChatId(int $chatid, string $field, $value): bool
     {
         return self::where('chatid', $chatid)->update([$field => $value]);
@@ -124,7 +124,6 @@ class Users extends Model
     }
 
 
-
     public static function updateData(int $chatid, $values): bool
     {
         return self::updateFieldByChatId($chatid, 'data', $values);
@@ -134,7 +133,6 @@ class Users extends Model
     {
         return self::updateFieldByChatId($chatid, 'role', $values);
     }
-
 
 
     public static function updateStatus(int $chatid, $values): bool
@@ -152,7 +150,6 @@ class Users extends Model
     {
         return self::updateFieldByChatId($chatid, 'lang', $values);
     }
-
 
 
     public static function getRecentUsers()

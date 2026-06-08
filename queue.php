@@ -1,10 +1,8 @@
 <?php
 
 use alirezax5\TelegramBase\App\Core;
+use alirezax5\TelegramBase\App\Enum\CoreMode;
 
 include './vendor/autoload.php';
-
-
-echo '<pre>';
-$core = new Core(true);
+$core = new Core(CoreMode::UPDATES_ONLY);
 $core->runFetchQueueUpdate();

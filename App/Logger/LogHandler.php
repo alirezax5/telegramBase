@@ -1,8 +1,12 @@
 <?php
+
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Logger;
 
-
+use alirezax5\TelegramBase\App\Config\AppConfig;
 use alirezax5\TelegramBase\App\Environment\EnvHandler;
+use \alirezax5\TelegramBase\App\Config\Config;
 use Monolog\Logger;
 use Monolog\Handler\StreamHandler;
 use Monolog\Formatter\LineFormatter;
@@ -10,34 +14,52 @@ use Monolog\Formatter\LineFormatter;
 class LogHandler
 {
     private static ?Logger $logger = null;
+    private static bool $enabled = false;
 
 
-    private static function init(): void
+
+    public static function init(): void
     {
-        if (self::$logger !== null) {
+       $config= Config::logger();
+        if (self::$logger !== null || self::$enabled) {
             return;
         }
 
-        if (strtolower(EnvHandler::get('LOG_ENABLED',false) ) !== 'true') {
+        self::$enabled = $config->enabled;
+
+        if (!$config->enabled) {
             return;
         }
 
-        $path = rtrim(EnvHandler::get('LOG_DIR','./logs/'), '/');
-        $file = EnvHandler::get('LOG_FILE','log.txt');
-        $fullPath = "{$path}/{$file}";
+        try {
+            if (!is_dir($config->directory)) {
+                mkdir($config->directory, 0777, true);
+            }
 
-        if (!is_dir($path)) {
-            mkdir($path, 0777, true);
+            self::$logger = new Logger('AppLogger');
+
+            $handler = new StreamHandler(
+                $config->fullPath(),
+                Logger::DEBUG
+            );
+
+            $handler->setFormatter(
+                new LineFormatter(
+                    "[%datetime%] [%level_name%]: %message% %context%\n",
+                    "Y-m-d H:i:s",
+                    true,
+                    true
+                )
+            );
+
+            self::$logger->pushHandler($handler);
+
+            self::$logger->info("Logger initialized");
+
+        } catch (\Throwable) {
+            self::$logger = null;
+            self::$enabled = false;
         }
-
-        self::$logger = new Logger('AppLogger');
-
-        $handler = new StreamHandler($fullPath, Logger::DEBUG);
-
-        $formatter = new LineFormatter("[%datetime%] [%level_name%]: %message%\n", "Y-m-d H:i:s", true, true);
-        $handler->setFormatter($formatter);
-
-        self::$logger->pushHandler($handler);
     }
 
 
@@ -45,13 +67,16 @@ class LogHandler
     {
         self::init();
 
-        if (self::$logger === null) {
+        if (!self::$enabled || self::$logger === null) {
             return;
         }
 
-        self::$logger->log(strtoupper($level), $message, $context);
+        try {
+            self::$logger->log(strtolower($level), $message, $context);
+        } catch (\Throwable) {
+            // هیچ خطایی نباید به اپلیکیشن سرایت کند
+        }
     }
-
 
     public static function info(string $message, array $context = []): void
     {
