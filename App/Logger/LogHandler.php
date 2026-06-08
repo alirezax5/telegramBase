@@ -17,28 +17,18 @@ class LogHandler
     private static bool $enabled = false;
 
 
-
     public static function init(): void
     {
-       $config= Config::logger();
+        $config = Config::logger();
         if (self::$logger !== null || self::$enabled) {
             return;
         }
 
-<<<<<<< HEAD
         self::$enabled = $config->enabled;
 
         if (!$config->enabled) {
             return;
         }
-=======
-        $logEnabled = EnvHandler::get('LOG_ENABLED', false);
-        $logEnabled = filter_var($logEnabled, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-
-        if ($logEnabled !== true) {
-            return;
-        }
->>>>>>> d91868226f4706400172e5afe1f25691cc14083f
 
         try {
             if (!is_dir($config->directory)) {
