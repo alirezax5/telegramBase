@@ -23,6 +23,7 @@ class JsonQueue implements QueueInterface
         }
     }
 
+<<<<<<< HEAD
     /**
      * PUSH (fast append-style file creation)
      */
@@ -41,6 +42,45 @@ class JsonQueue implements QueueInterface
             return false;
         }
     }
+=======
+    public function push(array $update): bool
+    {
+        $filename = uniqid('', true) . '.json';
+        $file = Path::join($this->path, $filename);
+
+        try {
+            $json = json_encode(
+                $update,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+            );
+        } catch (\JsonException $exception) {
+            error_log(sprintf('JsonQueue push failed to encode payload: %s', $exception->getMessage()));
+            return false;
+        }
+
+        $fp = fopen($file, 'c');
+        if (!$fp) return false;
+
+        $written = false;
+        if (flock($fp, LOCK_EX)) {
+            ftruncate($fp, 0);
+            $bytes = fwrite($fp, $json);
+            $written = $bytes !== false && $bytes === strlen($json);
+            if ($written) {
+                fflush($fp);
+            }
+            flock($fp, LOCK_UN);
+        }
+
+        fclose($fp);
+        if (!$written) {
+            $this->filesystem->remove($file);
+            return false;
+        }
+
+        return true;
+    }
+>>>>>>> d91868226f4706400172e5afe1f25691cc14083f
 
     /**
      * POP (optimized - avoids glob+sort each time)
