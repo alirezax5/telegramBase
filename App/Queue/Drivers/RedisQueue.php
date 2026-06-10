@@ -25,7 +25,7 @@ class RedisQueue implements QueueInterface
         }
     }
 
-    public function push(array $update): bool
+    public function push( $update): bool
     {
         if (!$this->isConnected()) {
             LogHandler::error("❌ Cannot push: Redis not connected.");

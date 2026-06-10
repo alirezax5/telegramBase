@@ -80,7 +80,7 @@ class QueueManager
     /**
      * PUSH (optimized retry)
      */
-    public function push(array $update): bool
+    public function push(mixed $update): bool
     {
         if (!$this->isConnected() && !$this->reconnect()) {
             return false;
@@ -92,7 +92,7 @@ class QueueManager
     /**
      * POP (optimized retry - NO recursion anymore)
      */
-    public function pop(): ?array
+    public function pop()
     {
         if (!$this->isConnected() && !$this->reconnect()) {
             return null;
@@ -104,7 +104,7 @@ class QueueManager
     /**
      * Unified retry engine (IMPORTANT improvement)
      */
-    private function executeWithRetry(callable $callback, string $action, array $context = []): mixed
+    private function executeWithRetry(callable $callback, string $action,  $context = []): mixed
     {
         $attempt = 0;
 

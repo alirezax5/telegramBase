@@ -71,14 +71,22 @@ class QueueWorker
                     continue;
                 }
 
-                $this->processor->processOne($update);
+                $this->processor->handle($update);
 
                 $processed++;
 
             } catch (\Throwable $e) {
 
                 LogHandler::error(
-                    'Queue worker error: ' . $e->getMessage()
+                    'Queue worker error: ' . $e->getMessage(),
+                    [
+                        'message'     => $e->getMessage(),
+                        'code'        => $e->getCode(),
+                        'file'        => $e->getFile(),
+                        'line'        => $e->getLine(),
+
+                        'update_id'   => $update->update_id ?? null,
+                    ]
                 );
 
                 usleep(500_000);

@@ -19,6 +19,7 @@ class RabbitQueue implements QueueInterface
     public function __construct(array $config)
     {
         $this->config = $config;
+        print_r($config['queue']);
         $this->queue = $config['queue'] ?? 'bot_queue';
 
         $this->initChannel();
@@ -71,7 +72,7 @@ class RabbitQueue implements QueueInterface
         return $this->channel !== null;
     }
 
-    public function push(array $update): bool
+    public function push( $update): bool
     {
         if (!$this->reconnectIfNeeded()) return false;
 
@@ -112,17 +113,23 @@ class RabbitQueue implements QueueInterface
 
             $data = json_decode($msg->body, true);
 
-            if (!is_array($data)) {
-                // invalid message → still ack to avoid poison loop
-                $this->channel->basic_ack($msg->getDeliveryTag());
+            $deliveryTag = $msg->delivery_info['delivery_tag'] ?? null;
+
+            if (!$deliveryTag) {
+                LogHandler::error("Missing delivery tag");
                 return null;
             }
 
-            $this->channel->basic_ack($msg->getDeliveryTag());
+            if (!is_array($data)) {
+                $this->channel->basic_ack($deliveryTag);
+                return null;
+            }
+
+            $this->channel->basic_ack($deliveryTag);
 
             return $data;
 
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             LogHandler::error("❌ RabbitMQ pop failed: {$e->getMessage()}");
             return null;
         }

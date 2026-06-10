@@ -29,7 +29,7 @@ class MemcachedQueue implements QueueInterface
         return "{$this->prefix}:{$name}";
     }
 
-    public function push(array $update): bool
+    public function push( $update): bool
     {
         if (!$this->isConnected()) return false;
 

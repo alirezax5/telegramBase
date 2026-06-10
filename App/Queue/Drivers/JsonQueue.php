@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace alirezax5\TelegramBase\App\Queue\Drivers;
 
+use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Queue\QueueInterface;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Filesystem\Path;
@@ -23,11 +24,10 @@ class JsonQueue implements QueueInterface
         }
     }
 
-<<<<<<< HEAD
     /**
      * PUSH (fast append-style file creation)
      */
-    public function push(array $update): bool
+    public function push($update): bool
     {
         try {
             $file = $this->path . '/' . microtime(true) . '_' . bin2hex(random_bytes(4)) . '.json';
@@ -42,45 +42,6 @@ class JsonQueue implements QueueInterface
             return false;
         }
     }
-=======
-    public function push(array $update): bool
-    {
-        $filename = uniqid('', true) . '.json';
-        $file = Path::join($this->path, $filename);
-
-        try {
-            $json = json_encode(
-                $update,
-                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
-            );
-        } catch (\JsonException $exception) {
-            error_log(sprintf('JsonQueue push failed to encode payload: %s', $exception->getMessage()));
-            return false;
-        }
-
-        $fp = fopen($file, 'c');
-        if (!$fp) return false;
-
-        $written = false;
-        if (flock($fp, LOCK_EX)) {
-            ftruncate($fp, 0);
-            $bytes = fwrite($fp, $json);
-            $written = $bytes !== false && $bytes === strlen($json);
-            if ($written) {
-                fflush($fp);
-            }
-            flock($fp, LOCK_UN);
-        }
-
-        fclose($fp);
-        if (!$written) {
-            $this->filesystem->remove($file);
-            return false;
-        }
-
-        return true;
-    }
->>>>>>> d91868226f4706400172e5afe1f25691cc14083f
 
     /**
      * POP (optimized - avoids glob+sort each time)
@@ -116,12 +77,39 @@ class JsonQueue implements QueueInterface
 
             @unlink($file);
 
+
             return is_array($data) ? $data : null;
 
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            LogHandler::error(
+                'Queue worker error: ' . $e->getMessage(),
+                [
+                    'message'     => $e->getMessage(),
+                    'code'        => $e->getCode(),
+                    'file'        => $e->getFile(),
+                    'line'        => $e->getLine(),
+
+                    'update_id'   => $update->update_id ?? null,
+                ]
+            );
             fclose($fp);
+
             return null;
         }
+    }
+
+    function toObject(mixed $data): object
+    {
+        if (is_object($data)) {
+            return $data;
+        }
+
+        if (!is_array($data)) {
+            return (object)[];
+        }
+
+        // روش قوی با json (ساده و سریع)
+        return json_decode(json_encode($data));
     }
 
     /**

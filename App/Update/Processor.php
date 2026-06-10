@@ -22,7 +22,7 @@ class Processor
      * اجرای چند آپدیت
      *  موقع اجرا حالت updates اجرا میشه
      */
-    public function handleBatch( $updates, ?callable $afterEach = null): void
+    public function handleBatch($updates, ?callable $afterEach = null): void
     {
         foreach ($updates as $update) {
 
@@ -37,34 +37,59 @@ class Processor
     /*
      * اجرا و ست اپدیت ها
      */
-    public function handle( $update): void
+    public function handle($update): void
     {
         if (empty($update)) {
             return;
         }
-
+        if (is_array($update)) {
+            $update = $this->toObject($update);   // تابع کمکی
+        }
         try {
 
             $this->Telegram->setInputData($update);
-
             $this->runPlugins($update);
 
         } catch (\Throwable $e) {
             LogHandler::error('Update failed', [
-                'message'     => $e->getMessage(),
-                'code'        => $e->getCode(),
-                'file'        => $e->getFile(),
-                'line'        => $e->getLine(),
+                'message' => $e->getMessage(),
+                'code' => $e->getCode(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
 
-                'update_id'   => $update->update_id ?? null,
+                'update_id' => $update->update_id ?? null,
             ]);
         }
+    }
+
+    private function toObject(mixed $data): object
+    {
+        if (is_object($data)) return $data;
+
+        if (!is_array($data)) {
+            return (object)[];
+        }
+
+        return $this->arrayToObject($data);
+    }
+
+    private function arrayToObject(array $array): object
+    {
+        $obj = new \stdClass();
+
+        foreach ($array as $key => $value) {
+            $obj->{$key} = is_array($value)
+                ? $this->arrayToObject($value)
+                : $value;
+        }
+
+        return $obj;
     }
 
     /*
      * اجرای پلاگین ها و پاس دادن اپدیت ها به آنها
      */
-    private function runPlugins( $update): void
+    private function runPlugins($update): void
     {
         if ($this->pluginHandler === null) {
             return;
@@ -77,6 +102,7 @@ class Processor
         if ($debug) {
             $start = microtime(true);
         }
+
 
         $this->pluginHandler->runAll($update, $this->Telegram);
 

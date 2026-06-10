@@ -109,24 +109,28 @@ class Core
         }
 
         $fetcher = new Fetcher($this->Telegram);
+        while (true) {
+            foreach ($fetcher->fetch() as $update) {
 
-        foreach ($fetcher->fetch() as $update) {
+                if (QueueBootstrap::$queue?->push($update)) {
 
-            if (QueueBootstrap::$queue?->push($update)) {
-
-                $fetcher->updateLastId(
-                    $update->update_id + 1
-                );
+                    $fetcher->updateLastId(
+                        $update->update_id + 1
+                    );
+                }
             }
+            $this->cleanup();
+            usleep(500_000);
         }
 
-        $this->cleanup();
+
     }
 
     private function cleanup(): void
     {
         SharedManagement::clear();
     }
+
     private function processor(): Processor
     {
         return new Processor(
