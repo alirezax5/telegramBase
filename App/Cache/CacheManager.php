@@ -10,7 +10,9 @@ use Illuminate\Cache\MemcachedStore;
 use Illuminate\Cache\Repository;
 use Illuminate\Cache\TaggedCache;
 use Illuminate\Filesystem\Filesystem;
-
+use Illuminate\Container\Container;
+use Illuminate\Redis\RedisManager;
+use Illuminate\Cache\RedisStore;
 use alirezax5\TelegramBase\App\Config\Config;
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Connection\ConnectionManager;
@@ -122,19 +124,30 @@ final class CacheManager
     private static function createRedisStore(CacheConfig $config): ?Repository
     {
         try {
-            if (!extension_loaded('redis')) {
-                return null;
-            }
 
-            $redis = ConnectionManager::getInstance()->getRedis();
-            if (!$redis) {
-                return null;
-            }
+            $redisManager = new RedisManager(
+                new Container(),
+                extension_loaded('redis') ? 'phpredis' : 'predis',
+                [
+                    'default' => [
+                        'host' => $config->host,
+                        'port' => $config->port,
+                        'database' => $config->database,
+                        'password' => $config->password ?: null,
+                    ],
+                ]
+            );
+
+            $redisManager->connection()->ping();
 
             self::$tagsSupported = true;
 
             return new Repository(
-                new \Illuminate\Cache\RedisStore($redis, $config->prefix)
+                new RedisStore(
+                    $redisManager,
+                    $config->prefix,
+                    'default'
+                )
             );
 
         } catch (\Throwable $e) {
@@ -142,7 +155,6 @@ final class CacheManager
             return null;
         }
     }
-
     // -------------------------
     // CORE STORE ACCESS
     // -------------------------
@@ -174,7 +186,12 @@ final class CacheManager
 
     public static function has(string $key): bool
     {
-        return self::store()->has($key);
+        $store = self::store();
+
+        var_dump($store->get($key));
+        var_dump($store->has($key));
+
+        return $store->has($key);
     }
 
     public static function forget(string $key): bool
