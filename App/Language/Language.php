@@ -195,12 +195,14 @@ class Language
     {
         $lang = $this->currentLang;
 
-        // lazy load
         if (!isset($this->translations[$lang])) {
             $this->setLanguage($lang);
         }
 
-        $value = $this->translations[$lang][$key] ?? null;
+        $value = $this->getNestedValue(
+            $this->translations[$lang] ?? [],
+            $key
+        );
 
         if ($value === null) {
             $this->missingKeys[$lang][$key] = true;
@@ -210,6 +212,27 @@ class Language
         }
 
         return $this->applyReplacements((string)$value, $replacements);
+    }
+
+    private function getNestedValue(array $array, string $key): mixed
+    {
+        if (isset($array[$key])) {
+            return $array[$key];
+        }
+
+        $keys = explode('.', $key);
+
+        $value = $array;
+
+        foreach ($keys as $segment) {
+            if (!is_array($value) || !array_key_exists($segment, $value)) {
+                return null;
+            }
+
+            $value = $value[$segment];
+        }
+
+        return $value;
     }
 
     private function applyReplacements(string $value, array $replacements): string
@@ -229,16 +252,19 @@ class Language
         return str_replace($search, $replace, $value);
     }
 
-    /**
-     * =========================
-     * UTIL
-     * =========================
-     */
+
     public function has(string $key, ?string $lang = null): bool
     {
         $lang ??= $this->currentLang;
 
-        return isset($this->translations[$lang][$key]);
+        if (!isset($this->translations[$lang])) {
+            $this->setLanguage($lang);
+        }
+
+        return $this->getNestedValue(
+                $this->translations[$lang] ?? [],
+                $key
+            ) !== null;
     }
 
     public function getAll(?string $lang = null): array
