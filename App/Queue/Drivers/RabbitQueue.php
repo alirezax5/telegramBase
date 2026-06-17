@@ -19,7 +19,6 @@ class RabbitQueue implements QueueInterface
     public function __construct(array $config)
     {
         $this->config = $config;
-        print_r($config['queue']);
         $this->queue = $config['queue'] ?? 'bot_queue';
 
         $this->initChannel();

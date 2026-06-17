@@ -178,9 +178,10 @@ class PluginHandler
         }
 
         foreach ($this->plugins as &$group) {
-            usort($group, fn($a, $b) => $a->getPriority() <=> $b->getPriority());
+            usort($group, fn($a, $b) =>
+                $a['plugin']->getPriority() <=> $b['plugin']->getPriority()
+            );
         }
-
         $this->saveToCache();
         $this->lastReloadTime = time();
 

@@ -188,8 +188,7 @@ final class CacheManager
     {
         $store = self::store();
 
-        var_dump($store->get($key));
-        var_dump($store->has($key));
+
 
         return $store->has($key);
     }
