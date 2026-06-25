@@ -71,7 +71,7 @@ final class Paths
     {
         return Path::join(
             self::$basePath,
-            EnvHandler::get('DB_FILE')
+            EnvHandler::get('DB_FILE', 'database.sqlite')
         );
     }
 

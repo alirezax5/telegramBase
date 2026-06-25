@@ -254,11 +254,17 @@ class PluginHandler
             return false;
         }
 
-        // validate
-        foreach (glob($this->pluginsDir . '/*.php') ?: [] as $file) {
-            $class = pathinfo($file, PATHINFO_FILENAME);
-            $fqcn = "\\alirezax5\\TelegramBase\\Plugin\\{$class}";
+        // validate (بازگشتی - همانند getPluginFiles تا پلاگین‌های داخل پوشه هم بررسی شوند)
+        $files = $this->getPluginFiles();
 
+        // اگر تعداد فایل‌ها با hashes تغییر کرده باشد (افزودن یا حذف پلاگین)
+        if (count($files) !== count($cached['hashes'])) {
+            LogHandler::info("🔄 Plugin set changed → cache invalid");
+            return false;
+        }
+
+        foreach ($files as $file) {
+            $fqcn = $this->pathToClass($file);
             $hash = (string)filemtime($file);
 
             if (($cached['hashes'][$fqcn] ?? null) !== $hash) {

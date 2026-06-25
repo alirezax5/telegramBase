@@ -113,28 +113,43 @@ class JsonQueue implements QueueInterface
     }
 
     /**
-     * Faster file selection (NO sort every time)
+     * Faster file selection (NO glob + NO filemtime per file)
      */
     private function getOldestFile(): ?string
     {
-        $files = glob($this->path . '/*.json');
+        $files = $this->scanJsonFiles();
 
         if (!$files) {
             return null;
         }
 
-        $oldestFile = null;
-        $oldestTime = PHP_INT_MAX;
+        // microtime در ابتدای نام فایل قرار دارد، پس مرتب‌سازی رشته‌ای
+        // همان ترتیب زمانی را می‌دهد و از N فراخوانی filemtime جلوگیری می‌کند.
+        sort($files);
 
-        foreach ($files as $file) {
-            $t = filemtime($file);
-            if ($t !== false && $t < $oldestTime) {
-                $oldestTime = $t;
-                $oldestFile = $file;
+        return $files[0];
+    }
+
+    /**
+     * لیست فایل‌های json صف را برمی‌گرداند (scandir از glob سریع‌تر است).
+     */
+    private function scanJsonFiles(): array
+    {
+        $entries = @scandir($this->path);
+
+        if ($entries === false) {
+            return [];
+        }
+
+        $files = [];
+
+        foreach ($entries as $entry) {
+            if ($entry[0] !== '.' && str_ends_with($entry, '.json')) {
+                $files[] = $this->path . '/' . $entry;
             }
         }
 
-        return $oldestFile;
+        return $files;
     }
 
     /**
@@ -142,8 +157,7 @@ class JsonQueue implements QueueInterface
      */
     public function count(): int
     {
-        $files = glob($this->path . '/*.json');
-        return $files ? count($files) : 0;
+        return count($this->scanJsonFiles());
     }
 
     /**
