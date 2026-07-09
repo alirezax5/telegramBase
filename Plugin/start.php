@@ -4,32 +4,21 @@ namespace alirezax5\TelegramBase\Plugin;
 
 use alirezax5\TelegramBase\App\Attributes\ChatType;
 use alirezax5\TelegramBase\App\Plugin\Contract\PluginInterface;
-
 use telegramBotApiPhp\Telegram;
 
-#[ChatType(['group'])]
-
+#[ChatType(['private'])]
 class start implements PluginInterface
 {
-
-
     public function getPriority(): int
     {
         return 1;
     }
 
-    public function onMessage($update, Telegram $Telegram)
+    public function onMessage($update, Telegram $Telegram): void
     {
-
         $chatid = $Telegram->fromId();
-        $text = $Telegram->text();
-        $Telegram->sendMessage($chatid, __('btn.btna'), [
-            'reply_markup' => btn('start')
+        $Telegram->sendMessage($chatid, __('main.ali'), [
+            'reply_markup' => btn('a.start'),
         ]);
-
-
-        return;
     }
-
-
 }

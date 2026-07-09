@@ -1,9 +1,9 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Bootstrap;
 
-
-use alirezax5\TelegramBase\App\Button\ButtonManager;
 use alirezax5\TelegramBase\App\Cache\CacheManager;
 use alirezax5\TelegramBase\App\Config\Config;
 use alirezax5\TelegramBase\App\Database\DatabaseManager;
@@ -15,7 +15,7 @@ use alirezax5\TelegramBase\App\Language\Language;
 
 final class Bootstrap
 {
-    public static function boot()
+    public static function boot(): void
     {
         Paths::initialize(dirname(__DIR__, 2));
         Paths::ensureDirectories();

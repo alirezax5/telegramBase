@@ -13,10 +13,12 @@ class MemcachedQueue implements QueueInterface
 {
     protected ?Memcached $memcached;
     protected string $prefix;
+    protected int $jobTtl;
 
     public function __construct(array $config)
     {
         $this->prefix = $config['key'] ?? 'bot_queue';
+        $this->jobTtl = (int)($config['job_ttl'] ?? 86400);
         $this->memcached = ConnectionManager::getInstance()->getMemcached();
 
         if (!$this->memcached) {
@@ -51,11 +53,11 @@ class MemcachedQueue implements QueueInterface
         return $this->memcached->set(
             $this->key("job:$id"),
             $payload,
-            600
+            $this->jobTtl
         );
     }
 
-    public function pop(): ?array
+    public function pop(int $timeout = 0): ?array
     {
         if (!$this->isConnected()) return null;
 
@@ -96,6 +98,27 @@ class MemcachedQueue implements QueueInterface
         $cursor = (int)($this->memcached->get($this->key('cursor')) ?: 0);
 
         return max(0, $index - $cursor);
+    }
+
+    /**
+     * CLEAR - reset cursor and delete all job keys
+     */
+    public function clear(): int
+    {
+        if (!$this->isConnected()) return 0;
+
+        $index = (int)($this->memcached->get($this->key('index')) ?: 0);
+        $cursor = (int)($this->memcached->get($this->key('cursor')) ?: 0);
+        $count = max(0, $index - $cursor);
+
+        for ($i = $cursor + 1; $i <= $index; $i++) {
+            $this->memcached->delete($this->key("job:$i"));
+        }
+
+        $this->memcached->set($this->key('index'), 0);
+        $this->memcached->set($this->key('cursor'), 0);
+
+        return $count;
     }
 
     public function isConnected(): bool

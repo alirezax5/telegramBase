@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace alirezax5\TelegramBase\App\Cache;
 
 use Illuminate\Contracts\Cache\Store;
+use alirezax5\TelegramBase\App\Logger\LogHandler;
 
 class CachRedisStore implements Store
 {
@@ -30,7 +31,14 @@ class CachRedisStore implements Store
             return null;
         }
 
-        return @unserialize($value) ?: null;
+        $result = @unserialize($value);
+
+        if ($result === false && $value !== 'b:0;') {
+            LogHandler::warning("Failed to unserialize cache key: {$key}");
+            return null;
+        }
+
+        return $result;
     }
 
     public function many(array $keys): array
@@ -39,19 +47,32 @@ class CachRedisStore implements Store
             return [];
         }
 
-        $results = [];
+        $prefixedKeys = [];
+        foreach ($keys as $idx => $key) {
+            $prefixedKeys[$idx] = $this->key($key);
+        }
 
-        foreach ($keys as $key) {
-            $results[$key] = $this->get($key);
+        $values = $this->redis->mGet(array_values($prefixedKeys));
+
+        $results = [];
+        foreach ($prefixedKeys as $idx => $pkey) {
+            $val = $values[$idx] ?? false;
+            if ($val === false || $val === null) {
+                $results[$keys[$idx]] = null;
+                continue;
+            }
+
+            $unserialized = @unserialize($val);
+            $results[$keys[$idx]] = ($unserialized === false && $val !== 'b:0;') ? null : $unserialized;
         }
 
         return $results;
     }
 
-    public function put($key, $value, $seconds)
+    public function put($key, $value, $seconds): bool
     {
-        $this->redis->setex(
-            $this->key($key),
+        return (bool) $this->redis->setex(
+            $this->key((string) $key),
             (int) $seconds,
             serialize($value)
         );
@@ -65,63 +86,60 @@ class CachRedisStore implements Store
 
         $ttl = (int) $seconds;
 
+        $this->redis->multi();
         foreach ($values as $key => $value) {
             $this->redis->setex(
-                $this->key((string)$key),
+                $this->key((string) $key),
                 $ttl,
                 serialize($value)
             );
         }
+        $result = $this->redis->exec();
 
-        return true;
+        return !in_array(false, $result, true);
     }
 
     public function increment($key, $value = 1)
     {
-        return $this->redis->incrBy($this->key($key), (int) $value);
+        return $this->redis->incrBy($this->key((string) $key), (int) $value);
     }
 
     public function decrement($key, $value = 1)
     {
-        return $this->redis->decrBy($this->key($key), (int) $value);
+        return $this->redis->decrBy($this->key((string) $key), (int) $value);
     }
 
-    public function forever($key, $value)
+    public function forever($key, $value): bool
     {
-        $this->redis->set(
-            $this->key($key),
+        return (bool) $this->redis->set(
+            $this->key((string) $key),
             serialize($value)
         );
     }
 
-    public function forget($key)
+    public function forget($key): bool
     {
-        return (bool) $this->redis->del($this->key($key));
+        return (bool) $this->redis->del($this->key((string) $key));
     }
 
     /**
-     * ⚠️ مهم: حذف keys() چون در Redis production خطرناک و O(N) هست
-     * جایگزین: اسکن سبک‌تر
+     * Flush all keys with the current prefix (SCAN-based, production-safe)
      */
-    public function flush()
+    public function flush(): bool
     {
         $pattern = $this->prefix . '*';
-
         $iterator = null;
-        $deleted = 0;
 
-        // استفاده از SCAN به جای KEYS (بهینه و production-safe)
         while ($keys = $this->redis->scan($iterator, $pattern, 1000)) {
             if (!empty($keys)) {
-                $this->redis->del($keys);
-                $deleted += count($keys);
+                $this->redis->unlink($keys);
             }
         }
 
         return true;
     }
 
-    public function getPrefix()
+    public function getPrefix(): string
     {
         return $this->prefix;
     }

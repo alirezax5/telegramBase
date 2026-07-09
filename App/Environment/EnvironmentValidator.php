@@ -19,8 +19,8 @@ class EnvironmentValidator
             , "BOT_API_URL is not valid URL");
 
         $this->require('BOT_MODE', fn($v) =>
-        in_array($v, ['update', 'webhook'], true)
-            , "BOT_MODE must be: update | webhook");
+        in_array($v, ['update_direct', 'update_queue', 'webhook_direct', 'webhook_queue', 'cronjob_update', 'cronjob_queue'], true)
+            , "BOT_MODE must be one of: update_direct, update_queue, webhook_direct, webhook_queue, cronjob_update, cronjob_queue");
     }
 
     /**

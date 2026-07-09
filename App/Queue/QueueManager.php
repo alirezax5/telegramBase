@@ -62,7 +62,7 @@ class QueueManager
 
             return new JsonQueue(
                 $this->config['path']
-                ?? sys_get_temp_dir() . '/queue'
+                ?: sys_get_temp_dir() . '/queue'
             );
         }
     }
@@ -73,7 +73,7 @@ class QueueManager
             'redis' => new RedisQueue($this->config['redis'] ?? []),
             'rabbitmq' => new RabbitQueue($this->config['rabbitmq'] ?? []),
             'memcached' => new MemcachedQueue($this->config['memcached'] ?? []),
-            default => new JsonQueue($this->config['path'] ?? sys_get_temp_dir() . '/queue'),
+            default => new JsonQueue($this->config['path'] ?: sys_get_temp_dir() . '/queue'),
         };
     }
 
@@ -92,13 +92,13 @@ class QueueManager
     /**
      * POP (optimized retry - NO recursion anymore)
      */
-    public function pop()
+    public function pop(int $timeout = 0)
     {
         if (!$this->isConnected() && !$this->reconnect()) {
             return null;
         }
 
-        return $this->executeWithRetry(fn() => $this->driver->pop(), 'pop');
+        return $this->executeWithRetry(fn() => $this->driver->pop($timeout), 'pop');
     }
 
     /**
@@ -221,13 +221,13 @@ class QueueManager
 
     public function clear(): int
     {
-        $count = 0;
-
-        while ($this->pop() !== null) {
-            $count++;
+        try {
+            $count = $this->driver->clear();
+        } catch (\Throwable) {
+            $count = 0;
         }
 
-        LogHandler::info("🗑 queue cleared: {$count}");
+        LogHandler::info("queue cleared: {$count}");
 
         return $count;
     }

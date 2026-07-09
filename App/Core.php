@@ -16,6 +16,7 @@ use alirezax5\TelegramBase\App\Plugin\PluginHandler;
 use alirezax5\TelegramBase\App\Queue\QueueWorker;
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Shared\SharedManagement;
+use alirezax5\TelegramBase\App\Language\Language;
 use alirezax5\TelegramBase\App\Cron\CronManager;
 
 class Core
@@ -33,7 +34,7 @@ class Core
 
         if ($mode === CoreMode::FULL) {
             PluginsBootstrap::boot();
-            $this->pluginHandler = PluginsBootstrap::$plugins;
+            $this->pluginHandler = PluginsBootstrap::getPlugins();
         }
     }
 
@@ -77,7 +78,9 @@ class Core
                 case 'cronjob_queue':
                     $this->cronManager->run(
                         Config::cron()->cronWorker,
-                        fn() => $this->queueWorker()->startInfinite()
+                        fn() => $this->queueWorker()->runLimited(
+                            Config::cron()->cronMaxTime
+                        )
                     );
                     break;
 
@@ -100,7 +103,7 @@ class Core
             $input = $this->Telegram->getInputData();
 
             if ($input) {
-                QueueBootstrap::$queue?->push($input);
+                QueueBootstrap::getQueue()?->push($input);
             }
 
             $this->cleanup();
@@ -112,7 +115,7 @@ class Core
         while (true) {
             foreach ($fetcher->fetch() as $update) {
 
-                if (QueueBootstrap::$queue?->push($update)) {
+                if (QueueBootstrap::getQueue()?->push($update)) {
 
                     $fetcher->updateLastId(
                         $update->update_id + 1
@@ -120,7 +123,6 @@ class Core
                 }
             }
             $this->cleanup();
-            usleep(500_000);
         }
 
 
@@ -129,6 +131,7 @@ class Core
     private function cleanup(): void
     {
         SharedManagement::clear();
+        Language::getInstance()->flushMissingKeys();
     }
 
     private function processor(): Processor
@@ -150,7 +153,7 @@ class Core
     private function queueWorker(): QueueWorker
     {
         return new QueueWorker(
-            QueueBootstrap::$queue,
+            QueueBootstrap::getQueue(),
             $this->pluginHandler,
             $this->Telegram
         );

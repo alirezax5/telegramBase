@@ -4,7 +4,7 @@ namespace alirezax5\TelegramBase\App\Update;
 
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Shared\SharedManagement;
-use alirezax5\TelegramBase\App\Update\Processor;
+use alirezax5\TelegramBase\App\Language\Language;
 
 class PollingLoop
 {
@@ -24,20 +24,18 @@ class PollingLoop
         set_time_limit(0);
         $this->registerSignalHandler();
 
-        LogHandler::info('🔄 Polling loop started');
+        LogHandler::info('Polling loop started');
 
         $this->runLoop();
 
-        LogHandler::info('🛑 Polling stopped');
+        LogHandler::info('Polling stopped');
     }
 
     /**
-     * Main loop (clean separation)
+     * Main loop
      */
     private function runLoop(): void
     {
-        $lastUpdateId = 0;
-
         while (!$this->shouldStop) {
 
             $this->dispatchSignals();
@@ -50,7 +48,7 @@ class PollingLoop
                     continue;
                 }
 
-                $this->handleBatch($updates, $lastUpdateId);
+                $this->handleBatch($updates);
 
                 $this->processedCount++;
 
@@ -64,25 +62,20 @@ class PollingLoop
     }
 
     /**
-     * Batch handling separated
+     * Batch handling with per-update offset confirmation
      */
-    private function handleBatch( $updates, int &$lastUpdateId): void
+    private function handleBatch($updates): void
     {
         $this->processor->handleBatch(
             $updates,
-            function ($update) use (&$lastUpdateId) {
-                $id = $update->update_id  ?? 0;
+            function ($update) {
+                $id = $update->update_id ?? 0;
 
-                if ($id > $lastUpdateId) {
-                    $lastUpdateId = $id;
+                if ($id > 0) {
+                    $this->fetcher->updateLastId($id + 1);
                 }
             }
         );
-
-        if ($lastUpdateId > 0) {
-            $this->fetcher->updateLastId($lastUpdateId + 1);
-            $lastUpdateId = 0;
-        }
     }
 
     /**
@@ -93,12 +86,12 @@ class PollingLoop
         if ($this->processedCount % 50 === 0) {
             gc_collect_cycles();
             clearstatcache();
+            SharedManagement::clear();
+            Language::getInstance()->flushMissingKeys();
         }
 
-        SharedManagement::clear();
-
         if ($this->processedCount >= $this->cleanupInterval) {
-            LogHandler::info('♻️ Restart cycle reached');
+            LogHandler::info('Restart cycle reached');
             $this->shouldStop = true;
         }
     }

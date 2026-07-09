@@ -1,18 +1,16 @@
 <?php
 
-
 use alirezax5\TelegramBase\App\Button\ButtonManager;
 
 if (!function_exists('btn')) {
-
     /**
-     * گرفتن دکمه از ButtonManager
+     * Get a button definition from ButtonManager.
      *
-     * مثال:
+     * Example:
      *   btn("profile", ["ID" => 12])
      *
-     * @param string $name نام دکمه در btn.php
-     * @param array $replace مقدار جایگزینی placeholder ها مثلا ["ID" => 12]
+     * @param string $name    Button name defined in btn.php
+     * @param array  $replace Placeholder replacement values e.g. ["ID" => 12]
      * @return array|null
      */
     function btn(string $name, array $replace = []): ?array

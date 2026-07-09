@@ -10,9 +10,6 @@ use Illuminate\Cache\MemcachedStore;
 use Illuminate\Cache\Repository;
 use Illuminate\Cache\TaggedCache;
 use Illuminate\Filesystem\Filesystem;
-use Illuminate\Container\Container;
-use Illuminate\Redis\RedisManager;
-use Illuminate\Cache\RedisStore;
 use alirezax5\TelegramBase\App\Config\Config;
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Connection\ConnectionManager;
@@ -23,10 +20,8 @@ final class CacheManager
     private static bool $initialized = false;
     private static string $driver = 'array';
     private static bool $tagsSupported = false;
+    private static ?int $cachedTtl = null;
 
-    // -------------------------
-    // INIT
-    // -------------------------
     public static function init(): void
     {
         if (self::$initialized && self::$instance) {
@@ -34,7 +29,8 @@ final class CacheManager
         }
 
         try {
-            $config = Config::Cache();
+            $config = Config::cache();
+            self::$cachedTtl = $config->ttl;
 
             $store = match ($config->driver) {
                 'memcached' => self::createMemcachedStore($config),
@@ -44,7 +40,7 @@ final class CacheManager
             };
 
             if (!$store) {
-                LogHandler::warning("⚠️ Cache fallback to array (driver: {$config->driver})");
+                LogHandler::warning("Cache fallback to array (driver: {$config->driver})");
                 $store = self::createArrayStore();
                 self::$driver = 'array';
             } else {
@@ -56,11 +52,10 @@ final class CacheManager
 
             self::healthCheck();
 
-            LogHandler::info("✅ Cache initialized: " . self::$driver);
-            LogHandler::info("🏷️ Tags support: " . (self::$tagsSupported ? 'yes' : 'no'));
-
+            LogHandler::info("Cache initialized: " . self::$driver);
+            LogHandler::info("Tags support: " . (self::$tagsSupported ? 'yes' : 'no'));
         } catch (\Throwable $e) {
-            LogHandler::error("❌ Cache init error: {$e->getMessage()}");
+            LogHandler::error("Cache init error: {$e->getMessage()}");
 
             self::$instance = self::createArrayStore();
             self::$driver = 'array';
@@ -69,9 +64,6 @@ final class CacheManager
         }
     }
 
-    // -------------------------
-    // STORES
-    // -------------------------
     private static function createArrayStore(): Repository
     {
         self::$tagsSupported = false;
@@ -90,9 +82,8 @@ final class CacheManager
             return new Repository(
                 new FileStore(new Filesystem(), $config->path)
             );
-
         } catch (\Throwable $e) {
-            LogHandler::warning("⚠️ File cache failed: {$e->getMessage()}");
+            LogHandler::warning("File cache failed: {$e->getMessage()}");
             return null;
         }
     }
@@ -109,14 +100,13 @@ final class CacheManager
                 return null;
             }
 
-            self::$tagsSupported = true;
+            self::$tagsSupported = false;
 
             return new Repository(
                 new MemcachedStore($memcached, $config->prefix)
             );
-
         } catch (\Throwable $e) {
-            LogHandler::warning("⚠️ Memcached failed: {$e->getMessage()}");
+            LogHandler::warning("Memcached failed: {$e->getMessage()}");
             return null;
         }
     }
@@ -124,51 +114,34 @@ final class CacheManager
     private static function createRedisStore(CacheConfig $config): ?Repository
     {
         try {
+            $redis = ConnectionManager::getInstance()->getRedis();
 
-            $redisManager = new RedisManager(
-                new Container(),
-                extension_loaded('redis') ? 'phpredis' : 'predis',
-                [
-                    'default' => [
-                        'host' => $config->host,
-                        'port' => $config->port,
-                        'database' => $config->database,
-                        'password' => $config->password ?: null,
-                    ],
-                ]
-            );
+            if (!$redis) {
+                LogHandler::warning("Redis cache: no shared connection");
+                return null;
+            }
 
-            $redisManager->connection()->ping();
+            $redis->ping();
 
-            self::$tagsSupported = true;
+            self::$tagsSupported = false;
 
             return new Repository(
-                new RedisStore(
-                    $redisManager,
-                    $config->prefix,
-                    'default'
-                )
+                new CachRedisStore($redis, $config->prefix)
             );
-
         } catch (\Throwable $e) {
-            LogHandler::warning("⚠️ Redis cache failed: {$e->getMessage()}");
+            LogHandler::warning("Redis cache failed: {$e->getMessage()}");
             return null;
         }
     }
-    // -------------------------
-    // CORE STORE ACCESS
-    // -------------------------
-    public static function store(): Repository
+
+    private static function store(): Repository
     {
-        return self::$instance ??= (function () {
+        if (!self::$instance) {
             self::init();
-            return self::$instance;
-        })();
+        }
+        return self::$instance;
     }
 
-    // -------------------------
-    // BASIC API
-    // -------------------------
     public static function get(string $key, mixed $default = null): mixed
     {
         return self::store()->get($key, $default);
@@ -186,11 +159,7 @@ final class CacheManager
 
     public static function has(string $key): bool
     {
-        $store = self::store();
-
-
-
-        return $store->has($key);
+        return self::store()->has($key);
     }
 
     public static function forget(string $key): bool
@@ -213,15 +182,12 @@ final class CacheManager
         return self::store()->decrement($key, $value);
     }
 
-    // -------------------------
-    // TAGS SUPPORT
-    // -------------------------
     public static function tagsSupported(): bool
     {
         return self::$tagsSupported;
     }
 
-    public static function tags($tags): TaggedCache
+    public static function tags(array|string $tags): TaggedCache
     {
         if (!self::$tagsSupported) {
             throw new \RuntimeException(
@@ -232,7 +198,7 @@ final class CacheManager
         return self::store()->tags($tags);
     }
 
-    public static function putWithTags($tags, string $key, mixed $value, ?int $ttl = null): bool
+    public static function putWithTags(array|string $tags, string $key, mixed $value, ?int $ttl = null): bool
     {
         if (!self::$tagsSupported) {
             return self::put(self::tagKey($tags, $key), $value, $ttl);
@@ -241,7 +207,7 @@ final class CacheManager
         return self::tags($tags)->put($key, $value, $ttl ?? self::ttl());
     }
 
-    public static function getWithTags($tags, string $key, mixed $default = null): mixed
+    public static function getWithTags(array|string $tags, string $key, mixed $default = null): mixed
     {
         if (!self::$tagsSupported) {
             return self::get(self::tagKey($tags, $key), $default);
@@ -250,7 +216,7 @@ final class CacheManager
         return self::tags($tags)->get($key, $default);
     }
 
-    public static function rememberWithTags($tags, string $key, callable $cb, ?int $ttl = null): mixed
+    public static function rememberWithTags(array|string $tags, string $key, callable $cb, ?int $ttl = null): mixed
     {
         if (!self::$tagsSupported) {
             return self::remember(self::tagKey($tags, $key), $cb, $ttl);
@@ -259,7 +225,7 @@ final class CacheManager
         return self::tags($tags)->remember($key, $ttl ?? self::ttl(), $cb);
     }
 
-    public static function flushTags($tags): bool
+    public static function flushTags(array|string $tags): bool
     {
         if (!self::$tagsSupported) {
             return false;
@@ -273,17 +239,14 @@ final class CacheManager
         }
     }
 
-    private static function tagKey($tags, string $key): string
+    private static function tagKey(array|string $tags, string $key): string
     {
         return 'tags:' . (is_array($tags) ? implode(':', $tags) : $tags) . ':' . $key;
     }
 
-    // -------------------------
-    // INTERNALS
-    // -------------------------
     private static function ttl(): int
     {
-        return Config::Cache()->ttl;
+        return self::$cachedTtl ?? Config::cache()->ttl;
     }
 
     private static function healthCheck(): void
@@ -292,7 +255,7 @@ final class CacheManager
             self::$instance?->put('__cache_test__', 1, 1);
             self::$instance?->forget('__cache_test__');
         } catch (\Throwable $e) {
-            LogHandler::warning("⚠️ Cache health check failed: {$e->getMessage()}");
+            LogHandler::warning("Cache health check failed: {$e->getMessage()}");
         }
     }
 
@@ -304,9 +267,5 @@ final class CacheManager
     public static function getDriver(): string
     {
         return self::$driver;
-    }
-    public static function isTagsSupported(): bool
-    {
-        return self::$tagsSupported;
     }
 }

@@ -13,20 +13,19 @@ use alirezax5\TelegramBase\App\Logger\LoggerConfig;
 use alirezax5\TelegramBase\App\Plugin\PluginConfig;
 use alirezax5\TelegramBase\App\Queue\QueueConfig;
 
-final  class AppConfig
+final class AppConfig
 {
     public function __construct(
-        public BotConfig        $bot,
-        public CacheConfig      $cache,
-        public QueueConfig $queue,
-        public ConnectionConfig $Connection,
-        public LanguageConfig $language,
-        public LoggerConfig     $logger,
-        public ButtonConfig $buttons,
-        public PluginConfig $plugins,
-        public CronConfig $cron,
-
-    )
-    {
+        public readonly BotConfig        $bot,
+        public readonly CacheConfig      $cache,
+        public readonly QueueConfig      $queue,
+        public readonly ConnectionConfig $connection,
+        public readonly LanguageConfig   $language,
+        public readonly LoggerConfig     $logger,
+        public readonly ButtonConfig     $buttons,
+        public readonly PluginConfig     $plugins,
+        public readonly CronConfig       $cron,
+        public readonly DatabaseConfig   $database,
+    ) {
     }
 }

@@ -57,56 +57,6 @@ class Fetcher
     }
 
     /**
-     * FIX: robust normalization (handles array + object + SDK wrapper)
-     */
-    private function normalize(mixed $items): array
-    {
-        if (is_array($items)) {
-            return $this->normalizeArray($items);
-        }
-
-        if (is_object($items)) {
-
-            // SDK wrapper case: returnedMessage -> result inside
-            if (isset($items->result)) {
-                return $this->normalize($items->result);
-            }
-
-            // toArray support
-            if (method_exists($items, 'toArray')) {
-                return $this->normalizeArray($items->toArray());
-            }
-
-            // fallback object → array
-            return $this->normalizeArray([(array)$items]);
-        }
-
-        return [];
-    }
-
-    /**
-     * Normalize array items
-     */
-    private function normalizeArray(array $items): array
-    {
-        return array_map(
-            static function ($item): array {
-
-                if (is_array($item)) {
-                    return $item;
-                }
-
-                if (is_object($item) && method_exists($item, 'toArray')) {
-                    return $item->toArray();
-                }
-
-                return (array) $item;
-            },
-            $items
-        );
-    }
-
-    /**
      * Update last processed offset
      */
     public function updateLastId(int $updateId): void

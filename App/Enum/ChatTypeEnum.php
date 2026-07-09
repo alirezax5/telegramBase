@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace alirezax5\TelegramBase\App\Plugin\Enum;
+namespace alirezax5\TelegramBase\App\Enum;
 
 enum ChatTypeEnum: string
 {

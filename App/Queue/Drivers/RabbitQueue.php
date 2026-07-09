@@ -99,7 +99,7 @@ class RabbitQueue implements QueueInterface
         }
     }
 
-    public function pop(): ?array
+    public function pop(int $timeout = 0): ?array
     {
         if (!$this->reconnectIfNeeded()) return null;
 
@@ -151,6 +151,36 @@ class RabbitQueue implements QueueInterface
 
         } catch (Throwable $e) {
             LogHandler::warning("⚠️ RabbitMQ count failed: {$e->getMessage()}");
+            return 0;
+        }
+    }
+
+    /**
+     * CLEAR - purge all messages from the queue
+     */
+    public function clear(): int
+    {
+        if (!$this->reconnectIfNeeded()) return 0;
+
+        try {
+            $result = $this->channel->queue_declare(
+                $this->queue,
+                true,
+                true,
+                false,
+                false
+            );
+
+            $count = (int)($result[1] ?? 0);
+
+            if ($count > 0) {
+                $this->channel->queue_purge($this->queue);
+            }
+
+            return $count;
+
+        } catch (Throwable $e) {
+            LogHandler::warning("RabbitMQ clear failed: {$e->getMessage()}");
             return 0;
         }
     }

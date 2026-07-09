@@ -70,20 +70,18 @@ class Processor
             return (object)[];
         }
 
-        return $this->arrayToObject($data);
+        return self::arrayToObject($data);
     }
 
-    private function arrayToObject(array $array): object
+    private function arrayToObject(array $data): object
     {
-        $obj = new \stdClass();
+        $result = [];
 
-        foreach ($array as $key => $value) {
-            $obj->{$key} = is_array($value)
-                ? $this->arrayToObject($value)
-                : $value;
+        foreach ($data as $key => $value) {
+            $result[$key] = is_array($value) ? self::arrayToObject($value) : $value;
         }
 
-        return $obj;
+        return (object)$result;
     }
 
     /*

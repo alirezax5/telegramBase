@@ -8,7 +8,6 @@ use alirezax5\TelegramBase\App\Config\Config;
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Cache\CacheManager;
 use alirezax5\TelegramBase\App\Environment\EnvHandler;
-use alirezax5\TelegramBase\App\Paths;
 use alirezax5\TelegramBase\App\Plugin\Contract\PluginInterface;
 use telegramBotApiPhp\Telegram;
 use ReflectionClass;
@@ -26,24 +25,24 @@ class PluginHandler
     ];
 
     private const CACHE_KEY_PLUGINS = 'plugin_handler:plugins_index';
-    private const CACHE_KEY_METHODS = 'plugin_handler:method_cache';
 
     /**
      * @var array<string,array<int,array{
-     *     plugin: PluginInterface,
+     *     class: string,
+     *     priority: int,
      *     chatTypes: array
      * }>>
      */
     private array $plugins = [];
+
+    /** @var array<string,PluginInterface> */
+    private array $instances = [];
 
     private ?string $pluginsDir = null;
     private int $lastReloadTime = 0;
     private int $reloadInterval;
     private bool $enableCache;
     private int $cacheTtl;
-
-    /** @var array<string,string> */
-    private array $methodCache = [];
 
     /** @var array<string,true> */
     private array $updateTypesFlip = [];
@@ -55,23 +54,18 @@ class PluginHandler
     {
         $this->reloadInterval = Config::plugins()->reloadInterval;
         $this->enableCache = (bool)Config::plugins()->cacheEnabled;
-        $pluginsPath = Config::plugins()->path;
-
-        $this->enableCache = $enableCache
-            ?? (bool)EnvHandler::get('PLUGIN_CACHE_ENABLED', true);
-
         $this->cacheTtl = (int)EnvHandler::get('PLUGIN_CACHE_TTL', 300);
+        $pluginsPath = Config::plugins()->path;
 
         $this->updateTypesFlip = array_fill_keys(self::UPDATE_TYPES, true);
 
         if (!is_dir($pluginsPath)) {
-            LogHandler::error("❌ Plugins directory not found: {$pluginsPath}");
+            LogHandler::error("Plugins directory not found: {$pluginsPath}");
             return;
         }
         $this->pluginsDir = realpath($pluginsPath) ?: $pluginsPath;
 
-
-        LogHandler::info("📁 Plugins dir: {$this->pluginsDir}");
+        LogHandler::info("Plugins dir: {$this->pluginsDir}");
 
         $this->loadPlugins();
     }
@@ -84,7 +78,7 @@ class PluginHandler
         if ($this->enableCache && CacheManager::isInitialized()) {
             if ($this->loadFromCache()) {
                 $this->lastReloadTime = time();
-                LogHandler::debug("⚡ Plugins loaded from cache");
+                LogHandler::debug("Plugins loaded from cache");
                 return;
             }
         }
@@ -124,16 +118,16 @@ class PluginHandler
 
     private function loadFromFiles(): void
     {
-        LogHandler::info("🔄 Scanning plugins...");
+        LogHandler::info("Scanning plugins...");
 
         $files = $this->getPluginFiles();
 
         $this->plugins = [];
-        $this->methodCache = [];
+        $this->instances = [];
         $this->fileHashes = [];
 
         if (!$files) {
-            LogHandler::warning("⚠️ No plugin files found");
+            LogHandler::warning("No plugin files found");
             return;
         }
 
@@ -163,14 +157,15 @@ class PluginHandler
 
                 /** @var PluginInterface $plugin */
                 $plugin = $ref->newInstance();
+                $this->instances[$fqcn] = $plugin;
 
-                $this->indexPlugin($plugin, $ref);
+                $this->indexPlugin($plugin, $ref, $fqcn);
 
                 $this->fileHashes[$fqcn] = (string)filemtime($file);
 
                 $loaded++;
 
-                LogHandler::debug("✔ loaded {$fqcn}");
+                LogHandler::debug("loaded {$fqcn}");
             } catch (\Throwable $e) {
                 $skipped++;
                 LogHandler::error("Plugin load error: {$file} | {$e->getMessage()}");
@@ -179,21 +174,21 @@ class PluginHandler
 
         foreach ($this->plugins as &$group) {
             usort($group, fn($a, $b) =>
-                $a['plugin']->getPriority() <=> $b['plugin']->getPriority()
+                $a['priority'] <=> $b['priority']
             );
         }
         $this->saveToCache();
         $this->lastReloadTime = time();
 
-        LogHandler::info("✅ Plugins: {$loaded} loaded, {$skipped} skipped");
+        LogHandler::info("Plugins: {$loaded} loaded, {$skipped} skipped");
     }
 
     private function indexPlugin(
         PluginInterface $plugin,
-        ReflectionClass $ref
+        ReflectionClass $ref,
+        string $fqcn
     ): void
     {
-
         $chatTypes = [];
 
         $attributes = $ref->getAttributes(
@@ -201,12 +196,12 @@ class PluginHandler
         );
 
         if ($attributes !== []) {
-
             /** @var \alirezax5\TelegramBase\App\Attributes\ChatType $attr */
             $attr = $attributes[0]->newInstance();
-
             $chatTypes = $attr->types;
         }
+
+        $priority = $plugin->getPriority();
 
         foreach ($ref->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
 
@@ -217,33 +212,24 @@ class PluginHandler
                 || $name === 'before'
                 || $name === 'after'
             ) {
-
                 $this->plugins[$name][] = [
-                    'plugin' => $plugin,
+                    'class' => $fqcn,
+                    'priority' => $priority,
                     'chatTypes' => $chatTypes,
                 ];
             }
         }
     }
 
-    private function canRun(
-        array    $pluginData,
-        Telegram $telegram
-    ): bool
+    private function canRun(array $pluginData, string $chatType): bool
     {
-
         $chatTypes = $pluginData['chatTypes'];
 
-        // Attribute وجود ندارد => همه مجازند
         if ($chatTypes === []) {
             return true;
         }
 
-        return in_array(
-            $telegram->chatType(),
-            $chatTypes,
-            true
-        );
+        return in_array($chatType, $chatTypes, true);
     }
 
     private function loadFromCache(): bool
@@ -254,12 +240,10 @@ class PluginHandler
             return false;
         }
 
-        // validate (بازگشتی - همانند getPluginFiles تا پلاگین‌های داخل پوشه هم بررسی شوند)
         $files = $this->getPluginFiles();
 
-        // اگر تعداد فایل‌ها با hashes تغییر کرده باشد (افزودن یا حذف پلاگین)
         if (count($files) !== count($cached['hashes'])) {
-            LogHandler::info("🔄 Plugin set changed → cache invalid");
+            LogHandler::info("Plugin set changed -> cache invalid");
             return false;
         }
 
@@ -268,13 +252,16 @@ class PluginHandler
             $hash = (string)filemtime($file);
 
             if (($cached['hashes'][$fqcn] ?? null) !== $hash) {
-                LogHandler::info("🔄 Plugin change detected → cache invalid");
+                LogHandler::info("Plugin change detected -> cache invalid");
                 return false;
             }
+
+            require_once $file;
         }
 
         $this->plugins = $cached['plugins'];
-        $this->methodCache = CacheManager::get(self::CACHE_KEY_METHODS) ?: [];
+        $this->fileHashes = $cached['hashes'];
+        $this->instances = [];
 
         return true;
     }
@@ -291,9 +278,7 @@ class PluginHandler
             'time' => time(),
         ], $this->cacheTtl);
 
-        CacheManager::put(self::CACHE_KEY_METHODS, $this->methodCache, $this->cacheTtl);
-
-        LogHandler::debug("💾 plugin cache saved");
+        LogHandler::debug("plugin cache saved");
     }
 
     public function runAll($update, Telegram $Telegram): void
@@ -308,19 +293,19 @@ class PluginHandler
             return;
         }
 
-        $method = $this->methodCache[$type]
-            ??= 'on' . str_replace(' ', '', ucwords(str_replace('_', ' ', $type)));
+        $method = 'on' . str_replace(' ', '', ucwords(str_replace('_', ' ', $type)));
 
         $data = $update->$type ?? null;
 
-        $this->run('before', $data, $Telegram);
-        $this->run($method, $data, $Telegram);
-        $this->run('after', $data, $Telegram);
+        $chatType = $Telegram->chatType();
+
+        $this->run('before', $data, $Telegram, $chatType);
+        $this->run($method, $data, $Telegram, $chatType);
+        $this->run('after', $data, $Telegram, $chatType);
     }
 
     private function detectType($update): ?string
     {
-
         foreach ($update as $key => $_) {
             if (isset($this->updateTypesFlip[$key])) {
                 return $key;
@@ -332,16 +317,19 @@ class PluginHandler
     private function run(
         string $method,
         object $data,
-        Telegram $Telegram
+        Telegram $Telegram,
+        string $chatType
     ): void {
 
         foreach ($this->plugins[$method] ?? [] as $pluginData) {
 
-            if (!$this->canRun($pluginData, $Telegram)) {
+            if (!$this->canRun($pluginData, $chatType)) {
                 continue;
             }
 
-            $plugin = $pluginData['plugin'];
+            $fqcn = $pluginData['class'];
+
+            $plugin = $this->instances[$fqcn] ??= new $fqcn();
 
             try {
 
@@ -351,7 +339,7 @@ class PluginHandler
 
                 LogHandler::error(
                     "Plugin error [{$method}] | " .
-                    "Plugin: " . $plugin::class . " | " .
+                    "Plugin: {$fqcn} | " .
                     "Message: {$e->getMessage()} | " .
                     "File: {$e->getFile()} | " .
                     "Line: {$e->getLine()} | " .
@@ -360,6 +348,7 @@ class PluginHandler
             }
         }
     }
+
     public function clearPluginCache(): void
     {
         if (!CacheManager::isInitialized()) {
@@ -367,9 +356,8 @@ class PluginHandler
         }
 
         CacheManager::forget(self::CACHE_KEY_PLUGINS);
-        CacheManager::forget(self::CACHE_KEY_METHODS);
 
-        LogHandler::info("🧹 plugin cache cleared");
+        LogHandler::info("plugin cache cleared");
     }
 
     public function reload(): void
@@ -380,8 +368,16 @@ class PluginHandler
 
     public function getStats(): array
     {
+        $classes = [];
+
+        foreach ($this->plugins as $group) {
+            foreach ($group as $item) {
+                $classes[$item['class']] = true;
+            }
+        }
+
         return [
-            'plugins' => count(array_unique(array_merge(...array_map('array_map', $this->plugins)))),
+            'plugins' => count($classes),
             'handlers' => array_sum(array_map('count', $this->plugins)),
             'events' => array_keys($this->plugins),
         ];

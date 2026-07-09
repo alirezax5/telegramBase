@@ -7,8 +7,11 @@ namespace alirezax5\TelegramBase\App\Attributes;
 use Attribute;
 
 #[Attribute(Attribute::TARGET_CLASS)]
-class ChatType
+readonly class ChatType
 {
+    /**
+     * @param array<int, string> $types
+     */
     public function __construct(
         public array $types
     ) {

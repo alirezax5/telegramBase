@@ -46,7 +46,7 @@ class JsonQueue implements QueueInterface
     /**
      * POP (optimized - avoids glob+sort each time)
      */
-    public function pop(): ?array
+    public function pop(int $timeout = 0): ?array
     {
         $file = $this->getOldestFile();
 
@@ -59,6 +59,8 @@ class JsonQueue implements QueueInterface
             return null;
         }
 
+        $closed = false;
+
         try {
             if (!flock($fp, LOCK_EX)) {
                 fclose($fp);
@@ -68,48 +70,32 @@ class JsonQueue implements QueueInterface
             $content = stream_get_contents($fp);
             $data = json_decode($content, true);
 
-            // mark as consumed (atomic safe)
             ftruncate($fp, 0);
             fflush($fp);
 
             flock($fp, LOCK_UN);
             fclose($fp);
+            $closed = true;
 
             @unlink($file);
-
 
             return is_array($data) ? $data : null;
 
         } catch (\Throwable $e) {
             LogHandler::error(
-                'Queue worker error: ' . $e->getMessage(),
+                'JsonQueue pop error: ' . $e->getMessage(),
                 [
-                    'message'     => $e->getMessage(),
-                    'code'        => $e->getCode(),
-                    'file'        => $e->getFile(),
-                    'line'        => $e->getLine(),
-
-                    'update_id'   => $update->update_id ?? null,
+                    'message' => $e->getMessage(),
+                    'file'   => $e->getFile(),
+                    'line'   => $e->getLine(),
                 ]
             );
-            fclose($fp);
+            if (!$closed) {
+                fclose($fp);
+            }
 
             return null;
         }
-    }
-
-    function toObject(mixed $data): object
-    {
-        if (is_object($data)) {
-            return $data;
-        }
-
-        if (!is_array($data)) {
-            return (object)[];
-        }
-
-        // روش قوی با json (ساده و سریع)
-        return json_decode(json_encode($data));
     }
 
     /**
@@ -123,15 +109,13 @@ class JsonQueue implements QueueInterface
             return null;
         }
 
-        // microtime در ابتدای نام فایل قرار دارد، پس مرتب‌سازی رشته‌ای
-        // همان ترتیب زمانی را می‌دهد و از N فراخوانی filemtime جلوگیری می‌کند.
         sort($files);
 
         return $files[0];
     }
 
     /**
-     * لیست فایل‌های json صف را برمی‌گرداند (scandir از glob سریع‌تر است).
+     * scandir-based scan (faster than glob)
      */
     private function scanJsonFiles(): array
     {
@@ -153,7 +137,7 @@ class JsonQueue implements QueueInterface
     }
 
     /**
-     * COUNT optimized (cheap fallback)
+     * COUNT optimized
      */
     public function count(): int
     {
@@ -161,7 +145,24 @@ class JsonQueue implements QueueInterface
     }
 
     /**
-     * CONNECTION check (real safe version)
+     * CLEAR - delete all queue files
+     */
+    public function clear(): int
+    {
+        $files = $this->scanJsonFiles();
+        $count = 0;
+
+        foreach ($files as $file) {
+            if (@unlink($file)) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * CONNECTION check
      */
     public function isConnected(): bool
     {

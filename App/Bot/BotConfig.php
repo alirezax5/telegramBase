@@ -6,21 +6,20 @@ namespace alirezax5\TelegramBase\App\Bot;
 
 use alirezax5\TelegramBase\App\Environment\EnvHandler;
 
-final  class BotConfig
+final class BotConfig
 {
     public function __construct(
-        public string $token,
-        public string $apiUrl,
-        public string $apiUrlFile,
-        public string $mode,
-        public string $webhookUrl,
-        public string $allowedUpdates,
-        public int    $pollingLimit,
-        public int    $pollingTimeout,
-        public string $pollingStateFile,
-        public bool   $appDebug,
-    )
-    {
+        public readonly string $token,
+        public readonly string $apiUrl,
+        public readonly string $apiUrlFile,
+        public readonly string $mode,
+        public readonly string $webhookUrl,
+        public readonly string $allowedUpdates,
+        public readonly int    $pollingLimit,
+        public readonly int    $pollingTimeout,
+        public readonly string $pollingStateFile,
+        public readonly bool   $appDebug,
+    ) {
         $this->validate();
     }
 
@@ -28,16 +27,14 @@ final  class BotConfig
     {
         return new self(
             token: EnvHandler::string('BOT_TOKEN'),
-            apiUrl: EnvHandler::string('BOT_API_URL', 'https://tapi.bale.ai'),
-            apiUrlFile: EnvHandler::string('BOT_API_URL_FILE', 'https://tapi.bale.ai'),
-            mode: EnvHandler::string('BOT_MODE', 'webhook_normal'),
+            apiUrl: EnvHandler::string('BOT_API_URL', 'https://api.telegram.org'),
+            apiUrlFile: EnvHandler::string('BOT_API_URL_FILE', 'https://api.telegram.org'),
+            mode: EnvHandler::string('BOT_MODE', 'update_direct'),
             webhookUrl: EnvHandler::string('BOT_WEBHOOK_URL', ''),
             allowedUpdates: EnvHandler::string('ALLOWED_UPDATES', 'all'),
-
             pollingLimit: EnvHandler::int('POLLING_LIMIT', 100),
             pollingTimeout: EnvHandler::int('POLLING_TIMEOUT', 30),
             pollingStateFile: EnvHandler::string('POLLING_STATE_FILE', 'lastupdate.txt'),
-
             appDebug: EnvHandler::bool('APP_DEBUG', false),
         );
     }
@@ -48,9 +45,15 @@ final  class BotConfig
             throw new \InvalidArgumentException('BOT_TOKEN cannot be empty');
         }
 
-        if (!in_array($this->mode, ['update_direct', 'update_queue', 'webhook_direct', 'webhook_queue', 'cronjob_update', 'cronjob_queue'], true)) {
+        $validModes = [
+            'update_direct', 'update_queue',
+            'webhook_direct', 'webhook_queue',
+            'cronjob_update', 'cronjob_queue',
+        ];
+
+        if (!in_array($this->mode, $validModes, true)) {
             throw new \InvalidArgumentException(
-                'BOT_MODE Not Supported: ' . $this->mode
+                "BOT_MODE not supported: {$this->mode}. Valid modes: " . implode(', ', $validModes)
             );
         }
 
@@ -69,11 +72,21 @@ final  class BotConfig
 
     public function isWebhookMode(): bool
     {
-        return $this->mode === 'webhook';
+        return str_starts_with($this->mode, 'webhook');
     }
 
     public function isUpdateMode(): bool
     {
-        return $this->mode === 'update';
+        return str_starts_with($this->mode, 'update');
+    }
+
+    public function isQueueMode(): bool
+    {
+        return str_ends_with($this->mode, '_queue');
+    }
+
+    public function isCronjobMode(): bool
+    {
+        return str_starts_with($this->mode, 'cronjob');
     }
 }

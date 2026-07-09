@@ -6,30 +6,29 @@ namespace alirezax5\TelegramBase\App\Button;
 
 use alirezax5\TelegramBase\App\Config\Config;
 use alirezax5\TelegramBase\App\Logger\LogHandler;
-use alirezax5\TelegramBase\App\Language\Language;
 use alirezax5\TelegramBase\App\Cache\CacheManager;
-use alirezax5\TelegramBase\App\Environment\EnvHandler;
 
 final class ButtonManager
 {
-    private static array $cache = [];
-    private static array $loaded = [];
-    private static array $mtime = [];
-    private static array $timestamp = [];
-
+    private static array $buttons = [];
+    private static bool $loaded = false;
     private static bool $init = false;
     private static int $ttl = 300;
+    private static string $buttonDir;
     private static string $buttonFile;
 
-    private const CACHE_PREFIX = 'buttons:';
+    private const CACHE_KEY = 'buttons:all';
 
     private static function init(): void
     {
-        if (self::$init) return;
+        if (self::$init) {
+            return;
+        }
 
         $config = Config::buttons();
 
         self::$buttonFile = $config->file;
+        self::$buttonDir = $config->dir;
         self::$ttl = $config->cacheTTL;
 
         self::$init = true;
@@ -39,95 +38,119 @@ final class ButtonManager
     {
         self::init();
 
-        $lang = Language::getInstance()->getCurrentLanguage();
-
-        if (self::isValid($lang)) {
+        if (self::$loaded) {
             return;
         }
 
-        if (self::fromCache($lang)) {
+        if (self::fromCache()) {
+            self::$loaded = true;
             return;
         }
 
-        self::fromFile($lang);
+        self::fromFiles();
+        self::$loaded = true;
     }
 
-    private static function isValid(string $lang): bool
+    private static function fromCache(): bool
     {
-        if (!isset(self::$loaded[$lang])) {
+        if (!CacheManager::isInitialized() || self::$ttl <= 0) {
             return false;
         }
 
-        if (self::$ttl <= 0) {
-            return false;
-        }
-
-        return (time() - (self::$timestamp[$lang] ?? 0)) < self::$ttl;
-    }
-
-    private static function fromCache(string $lang): bool
-    {
-        if (!CacheManager::isInitialized()) {
-            return false;
-        }
-
-        $data = CacheManager::get(self::CACHE_PREFIX . $lang);
+        $data = CacheManager::get(self::CACHE_KEY);
 
         if (!is_array($data)) {
             return false;
         }
 
-        self::$cache[$lang] = $data;
-        self::$loaded[$lang] = true;
-        self::$timestamp[$lang] = time();
+        self::$buttons = $data;
+
+        LogHandler::debug("Buttons cache HIT (" . count($data) . " entries)");
 
         return true;
     }
 
-    private static function fromFile(string $lang): void
+    private static function fromFiles(): void
     {
-        if (!is_readable(self::$buttonFile)) {
-            self::$cache[$lang] = [];
-            self::$loaded[$lang] = true;
-            return;
+        $merged = [];
+
+        // 1) Load main file: btn.php (keys as-is)
+        if (is_readable(self::$buttonFile)) {
+            $data = require self::$buttonFile;
+
+            if (is_array($data)) {
+                $merged = $data;
+                LogHandler::debug("Buttons main file loaded: " . self::$buttonFile . " (" . count($data) . " keys)");
+            }
         }
 
-        $mtime = filemtime(self::$buttonFile);
+        // 2) Load other *.php files from the same directory (with filename prefix)
+        if (is_dir(self::$buttonDir)) {
+            $entries = @scandir(self::$buttonDir);
 
-        if (isset(self::$mtime[$lang]) && self::$mtime[$lang] === $mtime) {
-            self::$timestamp[$lang] = time();
-            return;
+            if ($entries !== false) {
+                $mainBasename = basename(self::$buttonFile);
+                $subFiles = [];
+
+                foreach ($entries as $entry) {
+                    if ($entry === '.' || $entry === '..') {
+                        continue;
+                    }
+                    if ($entry === $mainBasename) {
+                        continue;
+                    }
+                    if (str_ends_with($entry, '.php')) {
+                        $subFiles[] = $entry;
+                    }
+                }
+
+                sort($subFiles);
+
+                foreach ($subFiles as $file) {
+                    $path = self::$buttonDir . DIRECTORY_SEPARATOR . $file;
+                    $data = require $path;
+
+                    if (is_array($data)) {
+                        $prefix = basename($file, '.php') . '.';
+                        $before = count($merged);
+                        $merged = array_merge($merged, self::prefixKeys($data, $prefix));
+                        $after = count($merged);
+                        LogHandler::debug("Buttons subfile loaded: {$file} (+" . ($after - $before) . " keys, prefix: {$prefix})");
+                    }
+                }
+            }
         }
 
-        $buttons = require self::$buttonFile;
+        self::$buttons = $merged;
 
-        if (!is_array($buttons)) {
-            $buttons = [];
+        if (CacheManager::isInitialized() && self::$ttl > 0) {
+            CacheManager::put(self::CACHE_KEY, $merged, self::$ttl);
         }
 
-        self::$cache[$lang] = $buttons;
-        self::$loaded[$lang] = true;
-        self::$mtime[$lang] = $mtime;
-        self::$timestamp[$lang] = time();
+        LogHandler::debug("Buttons total: " . count($merged) . " keys");
+    }
 
-        if (CacheManager::isInitialized()) {
-            CacheManager::put(self::CACHE_PREFIX . $lang, $buttons, self::$ttl);
+    private static function prefixKeys(array $data, string $prefix): array
+    {
+        $result = [];
+
+        foreach ($data as $key => $value) {
+            $result[$prefix . $key] = $value;
         }
+
+        return $result;
     }
 
     public static function get(string $name, array $replace = []): ?array
     {
         self::load();
 
-        $lang = Language::getInstance()->getCurrentLanguage();
-
-        $btn = self::$cache[$lang][$name] ?? null;
+        $btn = self::$buttons[$name] ?? null;
 
         if (!$btn) {
             return null;
         }
 
-        // fast replace (no JSON encode/decode)
         if ($replace) {
             foreach ($replace as $k => $v) {
                 $btn = self::replaceRecursive($btn, '{' . $k . '}', (string)$v);
@@ -154,47 +177,33 @@ final class ButtonManager
         return $data;
     }
 
-    public static function getAll(?string $lang = null): array
+    public static function getAll(): array
     {
         self::load();
 
-        $lang ??= Language::getInstance()->getCurrentLanguage();
-
-        return self::$cache[$lang] ?? [];
+        return self::$buttons;
     }
 
     public static function has(string $name): bool
     {
         self::load();
 
-        $lang = Language::getInstance()->getCurrentLanguage();
-
-        return isset(self::$cache[$lang][$name]);
+        return isset(self::$buttons[$name]);
     }
 
-    public static function clearCache(?string $lang = null): void
+    public static function clearCache(): void
     {
-        if ($lang === null) {
-            self::$cache = [];
-            self::$loaded = [];
-            self::$mtime = [];
-            self::$timestamp = [];
-            return;
-        }
+        self::$buttons = [];
+        self::$loaded = false;
 
-        unset(
-            self::$cache[$lang],
-            self::$loaded[$lang],
-            self::$mtime[$lang],
-            self::$timestamp[$lang]
-        );
+        if (CacheManager::isInitialized()) {
+            CacheManager::forget(self::CACHE_KEY);
+        }
     }
 
     public static function reload(): void
     {
-        self::$cache = [];
-        self::$loaded = [];
-        self::$mtime = [];
-        self::$timestamp = [];
+        self::clearCache();
+        self::load();
     }
 }

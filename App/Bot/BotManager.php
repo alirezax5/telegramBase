@@ -11,6 +11,7 @@ use alirezax5\TelegramBase\App\Logger\LogHandler;
 final class BotManager
 {
     private static ?self $instance = null;
+    /** @var array<string, Telegram> */
     private array $bots = [];
     private string $defaultBotName = 'main';
 
@@ -34,10 +35,16 @@ final class BotManager
         );
     }
 
-    public function get(string $name = null): Telegram
+    public function get(?string $name = null): Telegram
     {
         $name ??= $this->defaultBotName;
-        return $this->bots[$name] ?? $this->bots[$this->defaultBotName];
+
+        if (isset($this->bots[$name])) {
+            return $this->bots[$name];
+        }
+
+        LogHandler::warning("Bot '{$name}' not found, falling back to default '{$this->defaultBotName}'");
+        return $this->bots[$this->defaultBotName];
     }
 
     public function setDefaultToken(string $token): Telegram
@@ -45,5 +52,10 @@ final class BotManager
         $bot = $this->get();
         $bot->setToken($token);
         return $bot;
+    }
+
+    public function add(string $name, Telegram $bot): void
+    {
+        $this->bots[$name] = $bot;
     }
 }

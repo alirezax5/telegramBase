@@ -43,11 +43,14 @@ final class DatabaseManager
 
     public static function connection(?string $name = null)
     {
-        return self::$capsule
-            ->getConnection($name);
+        if (self::$capsule === null) {
+            throw new \RuntimeException('Database is not initialized.');
+        }
+
+        return self::$capsule->getConnection($name);
     }
 
-    public static function capsule(): Capsule
+    public static function capsule(): ?Capsule
     {
         return self::$capsule;
     }

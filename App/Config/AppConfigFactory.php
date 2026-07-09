@@ -15,13 +15,14 @@ use alirezax5\TelegramBase\App\Queue\QueueConfig;
 use alirezax5\TelegramBase\App\Connection\ConnectionConfig;
 use alirezax5\TelegramBase\App\Paths;
 use alirezax5\TelegramBase\App\Cron\CronConfig;
+
 final class AppConfigFactory
 {
     public static function create(): AppConfig
     {
         return new AppConfig(
             bot: BotConfig::fromEnv(),
-            Connection: ConnectionConfig::fromEnv(),
+            connection: ConnectionConfig::fromEnv(),
             cache: CacheConfig::fromEnv(),
             queue: QueueConfig::fromEnv(),
             language: LanguageConfig::fromEnv(),
@@ -29,15 +30,19 @@ final class AppConfigFactory
             buttons: ButtonConfig::fromEnv(),
             plugins: PluginConfig::fromEnv(),
             cron: CronConfig::fromEnv(),
+            database: self::createDatabaseConfig(),
         );
     }
+
     public static function createDatabaseConfig(): DatabaseConfig
     {
         $file = Paths::databaseConnections();
 
         if (!file_exists($file)) {
-            throw new \RuntimeException(
-                "Database configuration file not found: {$file}"
+            return new DatabaseConfig(
+                enable: false,
+                default: 'main',
+                connections: [],
             );
         }
 

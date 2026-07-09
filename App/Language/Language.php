@@ -22,7 +22,8 @@ class Language
     private int $cacheTTL = 60;
     private string $langDriver = 'json';
     private array $missingKeys = [];
-    private $config;
+    private bool $missingKeysDirty = false;
+    private LanguageConfig $config;
 
     private const CACHE_PREFIX = 'lang:';
     private const CACHE_MISSING_KEYS = 'lang:missing_keys';
@@ -32,7 +33,6 @@ class Language
         $this->fs = new Filesystem();
         $this->config = Config::language();
         $this->loadConfiguration();
-
     }
 
     public static function getInstance(): self
@@ -54,12 +54,18 @@ class Language
 
     public function setLanguageDir(string $dir): self
     {
-        if (!$this->fs->exists($dir)) {
-            LogHandler::error("❌ Language directory not found: {$dir}");
+        $dir = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $dir);
+
+        if (!is_dir($dir)) {
+            LogHandler::error("Language directory not found: {$dir}");
             return $this;
         }
 
-        $this->languageDir = realpath($dir) ?: null;
+        $real = realpath($dir);
+        $this->languageDir = $real !== false ? $real : $dir;
+
+        LogHandler::debug("Language dir set: {$this->languageDir}");
+
         return $this;
     }
 
@@ -77,17 +83,12 @@ class Language
         $this->currentLang = $lang;
 
         if (!$this->loadFromCache($lang)) {
-            LogHandler::debug("📂 Language cache MISS → loading file: {$lang}");
+            LogHandler::debug("Language cache MISS -> loading file: {$lang}");
             $this->loadLanguageFile($lang);
         }
         return $this;
     }
 
-    /**
-     * =========================
-     * CACHE LOAD (OPTIMIZED)
-     * =========================
-     */
     private function loadFromCache(string $lang): bool
     {
         if (!CacheManager::isInitialized() || $this->cacheTTL <= 0) {
@@ -98,14 +99,13 @@ class Language
         $cached = CacheManager::get($cacheKey);
 
         if (!is_array($cached)) {
-            LogHandler::debug("❌ Language cache MISS: {$lang}");
             return false;
         }
 
         $this->translations[$lang] = $cached;
         $this->cacheTime[$lang] = time();
 
-        LogHandler::debug("🌍 Language cache HIT: {$lang} (" . count($cached) . " entries)");
+        LogHandler::debug("Language cache HIT: {$lang} (" . count($cached) . " entries)");
 
         return true;
     }
@@ -130,43 +130,101 @@ class Language
         }
     }
 
-    /**
-     * =========================
-     * FILE LOADING (OPTIMIZED)
-     * =========================
-     */
-    private function loadLanguageFile(string $lang): void
+    public function flushMissingKeys(): void
     {
-        $dir = $this->languageDir ?? $this->config->dir;
-
-        if (!$dir || !$this->fs->exists($dir)) {
-            $this->translations[$lang] = [];
-            return;
+        if ($this->missingKeysDirty) {
+            $this->saveMissingKeysToCache();
+            $this->missingKeysDirty = false;
         }
-
-        $file = $this->getFilePath($dir, $lang);
-
-        if (!is_readable($file)) {
-            $this->translations[$lang] = [];
-            return;
-        }
-
-        $data = $this->parseFile($file);
-
-        if (!is_array($data)) {
-            $this->translations[$lang] = [];
-            return;
-        }
-
-        $this->translations[$lang] = $data;
-        $this->cacheTime[$lang] = time();
-        $this->saveToCache($lang, $data);
     }
 
-    private function getFilePath(string $dir, string $lang): string
+    private function loadLanguageFile(string $lang): void
     {
-        $ext = $this->langDriver === 'php' ? 'php' : 'json';
-        return $dir . DIRECTORY_SEPARATOR . $lang . '.' . $ext;
+        $dir = $this->languageDir;
+
+        if (!$dir || !is_dir($dir)) {
+            $dir = $this->resolveDir();
+        }
+
+        if (!$dir || !is_dir($dir)) {
+            LogHandler::error("Language directory not available for lang: {$lang}");
+            $this->translations[$lang] = [];
+            return;
+        }
+
+        $merged = [];
+
+        // 1) Load main file: {dir}/{lang}.php
+        $mainFile = $dir . DIRECTORY_SEPARATOR . $lang . '.php';
+
+        if (is_readable($mainFile)) {
+            $data = $this->parseFile($mainFile);
+            if (is_array($data)) {
+                $merged = $data;
+                LogHandler::debug("Language main file loaded: {$mainFile} (" . count($data) . " keys)");
+            }
+        } else {
+            LogHandler::debug("Language main file not readable: {$mainFile}");
+        }
+
+        // 2) If {dir}/{lang}/ subdirectory exists, load all php files from it
+        $subDir = $dir . DIRECTORY_SEPARATOR . $lang;
+
+        if (is_dir($subDir)) {
+            $ext = $this->langDriver === 'php' ? 'php' : 'json';
+            $entries = @scandir($subDir);
+
+            if ($entries !== false) {
+                $subFiles = [];
+                foreach ($entries as $entry) {
+                    if ($entry === '.' || $entry === '..') {
+                        continue;
+                    }
+                    $extLen = strlen($ext) + 1;
+                    if (substr($entry, -$extLen) === '.' . $ext) {
+                        $subFiles[] = $entry;
+                    }
+                }
+                sort($subFiles);
+
+                foreach ($subFiles as $file) {
+                    $path = $subDir . DIRECTORY_SEPARATOR . $file;
+                    $data = $this->parseFile($path);
+                    if (is_array($data)) {
+                        $prefix = basename($file, '.' . $ext) . '.';
+                        $before = count($merged);
+                        $merged = array_merge($merged, $this->prefixKeys($data, $prefix));
+                        $after = count($merged);
+                        LogHandler::debug("Language subfile loaded: {$file} (+" . ($after - $before) . " keys, prefix: {$prefix})");
+                    }
+                }
+            }
+        }
+
+        $this->translations[$lang] = $merged;
+        $this->cacheTime[$lang] = time();
+        $this->saveToCache($lang, $merged);
+
+        LogHandler::debug("Language '{$lang}' total: " . count($merged) . " keys");
+    }
+
+    private function resolveDir(): ?string
+    {
+        $dir = ltrim($this->config->dir, '/\\');
+        $full = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . $dir;
+
+        return is_dir($full) ? $full : null;
+    }
+
+    private function prefixKeys(array $data, string $prefix): array
+    {
+        $result = [];
+
+        foreach ($data as $key => $value) {
+            $result[$prefix . $key] = $value;
+        }
+
+        return $result;
     }
 
     private function parseFile(string $file): ?array
@@ -186,11 +244,6 @@ class Language
         }
     }
 
-    /**
-     * =========================
-     * CORE GET (OPTIMIZED)
-     * =========================
-     */
     public function get(string $key, $default = null, array $replacements = []): string
     {
         $lang = $this->currentLang;
@@ -205,8 +258,10 @@ class Language
         );
 
         if ($value === null) {
-            $this->missingKeys[$lang][$key] = true;
-            $this->saveMissingKeysToCache();
+            if (!isset($this->missingKeys[$lang][$key])) {
+                $this->missingKeys[$lang][$key] = true;
+                $this->missingKeysDirty = true;
+            }
 
             $value = $default ?? $key;
         }
@@ -221,14 +276,12 @@ class Language
         }
 
         $keys = explode('.', $key);
-
         $value = $array;
 
         foreach ($keys as $segment) {
             if (!is_array($value) || !array_key_exists($segment, $value)) {
                 return null;
             }
-
             $value = $value[$segment];
         }
 
@@ -251,7 +304,6 @@ class Language
 
         return str_replace($search, $replace, $value);
     }
-
 
     public function has(string $key, ?string $lang = null): bool
     {

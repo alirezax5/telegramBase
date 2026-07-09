@@ -12,14 +12,18 @@ class Users extends Model
     protected $primaryKey = 'chatid';
     protected $casts = [
         'active' => 'boolean',
-        'status' => 'boolean'
+        'status' => 'boolean',
     ];
     public $timestamps = false;
     protected $connection = 'main';
 
     public static function checkAndInsert(int $chatid): bool
     {
-        return !self::check($chatid) && self::insertOrIgnore(['chatid' => $chatid]);
+        if (self::check($chatid)) {
+            return false;
+        }
+
+        return self::insertOrIgnore(['chatid' => $chatid]);
     }
 
     public static function check(int $chatid): bool
@@ -33,12 +37,15 @@ class Users extends Model
         return $limit ? $query->paginate($per, ['*'], 'page', $page) : $query->get();
     }
 
-    public static function getAllStatusActiveUserByLang($lang = 'all', bool $limit = true, int $page = 1, int $per = 20)
+    public static function getAllStatusActiveUserByLang(string $lang = 'all', bool $limit = true, int $page = 1, int $per = 20)
     {
-        if ($lang == 'all')
-            $query = self::where('status', true)->orderBy('id');
-        else
-            $query = self::where('status', true)->where('lang', $lang)->orderBy('id');
+        $query = self::where('status', true);
+
+        if ($lang !== 'all') {
+            $query->where('lang', $lang);
+        }
+
+        $query->orderBy('id');
 
         return $limit ? $query->paginate($per, ['*'], 'page', $page) : $query->get();
     }
@@ -65,7 +72,7 @@ class Users extends Model
         return self::getByRole('admin');
     }
 
-    public static function getCountByField(string $field, $value): int
+    public static function getCountByField(string $field, mixed $value): int
     {
         return self::where($field, $value)->count();
     }
@@ -84,7 +91,6 @@ class Users extends Model
     {
         return self::count();
     }
-
 
     public static function getCountAdmin(): int
     {
@@ -106,61 +112,52 @@ class Users extends Model
         return self::where('chatid', $chatid)->first();
     }
 
-    public static function getUserById($id)
+    public static function getUserById(int $id)
     {
         return self::where('id', $id)->first();
-
     }
 
-
-    public static function updateFieldByChatId(int $chatid, string $field, $value): bool
+    public static function updateFieldByChatId(int $chatid, string $field, mixed $value): bool
     {
-        return self::where('chatid', $chatid)->update([$field => $value]);
+        return (bool) self::where('chatid', $chatid)->update([$field => $value]);
     }
 
-    public static function updateCommand(int $chatid, $values): bool
+    public static function updateCommand(int $chatid, mixed $value): bool
     {
-        return self::updateFieldByChatId($chatid, 'command', $values);
+        return self::updateFieldByChatId($chatid, 'command', $value);
     }
 
-
-    public static function updateData(int $chatid, $values): bool
+    public static function updateData(int $chatid, mixed $value): bool
     {
-        return self::updateFieldByChatId($chatid, 'data', $values);
+        return self::updateFieldByChatId($chatid, 'data', $value);
     }
 
-    public static function updateRole(int $chatid, $values): bool
+    public static function updateRole(int $chatid, mixed $value): bool
     {
-        return self::updateFieldByChatId($chatid, 'role', $values);
+        return self::updateFieldByChatId($chatid, 'role', $value);
     }
 
-
-    public static function updateStatus(int $chatid, $values): bool
+    public static function updateStatus(int $chatid, mixed $value): bool
     {
-        return self::updateFieldByChatId($chatid, 'status', $values);
+        return self::updateFieldByChatId($chatid, 'status', $value);
     }
 
-    public static function updateActive(int $chatid, $values): bool
+    public static function updateActive(int $chatid, mixed $value): bool
     {
-        return self::updateFieldByChatId($chatid, 'active', $values);
+        return self::updateFieldByChatId($chatid, 'active', $value);
     }
 
-
-    public static function updateLang(int $chatid, $values): bool
+    public static function updateLang(int $chatid, mixed $value): bool
     {
-        return self::updateFieldByChatId($chatid, 'lang', $values);
+        return self::updateFieldByChatId($chatid, 'lang', $value);
     }
 
-
-    public static function getRecentUsers()
+    public static function getRecentUsers(): int
     {
-        $twentyFourHoursAgo = Carbon::today();
+        $twentyFourHoursAgo = Carbon::now()->subDay();
 
-        $recentUsers = DB::table('users')
-            ->where('create_at', '>=', $twentyFourHoursAgo)
+        return DB::table('users')
+            ->where('created_at', '>=', $twentyFourHoursAgo)
             ->count();
-
-        return $recentUsers;
     }
-
 }

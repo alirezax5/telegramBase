@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Config;
 
 use alirezax5\TelegramBase\App\Bot\BotConfig;
@@ -13,66 +15,73 @@ use alirezax5\TelegramBase\App\Logger\LoggerConfig;
 use alirezax5\TelegramBase\App\Plugin\PluginConfig;
 use alirezax5\TelegramBase\App\Queue\QueueConfig;
 
-final  class Config
+/**
+ * Static facade for accessing application configuration.
+ *
+ * Provides type-safe access to all sub-configurations through
+ * static methods after Config::init() has been called during bootstrap.
+ */
+final class Config
 {
-    private static ?DatabaseConfig $database = null;
-
-    private static AppConfig $instance;
+    private static ?AppConfig $appConfig = null;
 
     public static function init(AppConfig $config): void
     {
-        self::$instance = $config;
+        self::$appConfig = $config;
     }
 
     public static function bot(): BotConfig
     {
-        return self::$instance->bot;
-    }
-
-    public static function logger(): LoggerConfig
-    {
-        return self::$instance->logger;
+        return self::$appConfig->bot;
     }
 
     public static function cache(): CacheConfig
     {
-        return self::$instance->cache;
-    }
-
-    public static function Connection(): ConnectionConfig
-    {
-        return self::$instance->Connection;
-    }
-
-    public static function database(): DatabaseConfig
-    {
-        return self::$database
-            ??= AppConfigFactory::createDatabaseConfig();
-    }
-
-    public static function language(): LanguageConfig
-    {
-        return self::$instance->language;
-    }
-
-    public static function buttons(): ButtonConfig
-    {
-        return self::$instance->buttons;
+        return self::$appConfig->cache;
     }
 
     public static function queue(): QueueConfig
     {
-        return self::$instance->queue;
+        return self::$appConfig->queue;
+    }
+
+    public static function connection(): ConnectionConfig
+    {
+        return self::$appConfig->connection;
+    }
+
+    public static function language(): LanguageConfig
+    {
+        return self::$appConfig->language;
+    }
+
+    public static function logger(): LoggerConfig
+    {
+        return self::$appConfig->logger;
+    }
+
+    public static function buttons(): ButtonConfig
+    {
+        return self::$appConfig->buttons;
     }
 
     public static function plugins(): PluginConfig
     {
-        return self::$instance->plugins;
+        return self::$appConfig->plugins;
     }
 
     public static function cron(): CronConfig
     {
-        return self::$instance->cron;
+        return self::$appConfig->cron;
     }
 
+    public static function database(): DatabaseConfig
+    {
+        return self::$appConfig->database;
+    }
+
+    public static function has(): bool
+    {
+        return self::$appConfig !== null;
+    }
 }

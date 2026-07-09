@@ -1,17 +1,25 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Queue;
 
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Plugin\PluginHandler;
-use alirezax5\TelegramBase\App\Queue\QueueManager;
 use alirezax5\TelegramBase\App\Update\Processor;
+use alirezax5\TelegramBase\App\Shared\SharedManagement;
+use alirezax5\TelegramBase\App\Language\Language;
 use telegramBotApiPhp\Telegram;
 
-class QueueWorker
+final class QueueWorker
 {
     private QueueManager $queue;
     private Processor $processor;
+
+    private const BLOCK_TIMEOUT = 5;
+    private const CLEANUP_INTERVAL = 100;
+
+    private int $processedCount = 0;
 
     public function __construct(
         QueueManager $queue,
@@ -22,21 +30,15 @@ class QueueWorker
         $this->processor = new Processor($plugins, $Telegram);
     }
 
-    /**
-     * Daemon mode
-     */
     public function startInfinite(): void
     {
         set_time_limit(0);
 
-        LogHandler::info('🔄 Queue worker started');
+        LogHandler::info('Queue worker started');
 
         $this->processLoop();
     }
 
-    /**
-     * Cron mode
-     */
     public function runLimited(int $maxSeconds = 50): void
     {
         $processed = $this->processLoop(
@@ -44,48 +46,44 @@ class QueueWorker
         );
 
         LogHandler::info(
-            "✅ Limited worker finished: {$processed} updates"
+            "Limited worker finished: {$processed} updates"
         );
     }
 
-    /**
-     * Shared processing loop
-     */
     private function processLoop(?int $endTime = null): int
     {
         $processed = 0;
 
         while ($endTime === null || time() < $endTime) {
-
             try {
-
                 if (!$this->queue->isConnected()) {
                     usleep(500_000);
                     continue;
                 }
 
-                $update = $this->queue->pop();
+                $update = $this->queue->pop(self::BLOCK_TIMEOUT);
 
                 if (!$update) {
-                    usleep(100_000);
+                    $this->maintenance();
                     continue;
                 }
 
                 $this->processor->handle($update);
 
                 $processed++;
+                $this->processedCount++;
+
+                $this->maintenance();
 
             } catch (\Throwable $e) {
-
                 LogHandler::error(
                     'Queue worker error: ' . $e->getMessage(),
                     [
-                        'message'     => $e->getMessage(),
-                        'code'        => $e->getCode(),
-                        'file'        => $e->getFile(),
-                        'line'        => $e->getLine(),
-
-                        'update_id'   => $update->update_id ?? null,
+                        'message'   => $e->getMessage(),
+                        'code'      => $e->getCode(),
+                        'file'      => $e->getFile(),
+                        'line'      => $e->getLine(),
+                        'update_id' => isset($update) && is_object($update) ? ($update->update_id ?? null) : null,
                     ]
                 );
 
@@ -94,5 +92,15 @@ class QueueWorker
         }
 
         return $processed;
+    }
+
+    private function maintenance(): void
+    {
+        if ($this->processedCount % 50 === 0) {
+            gc_collect_cycles();
+            clearstatcache();
+            SharedManagement::clear();
+            Language::getInstance()->flushMissingKeys();
+        }
     }
 }
