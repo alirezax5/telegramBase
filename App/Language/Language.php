@@ -221,10 +221,25 @@ class Language
         $result = [];
 
         foreach ($data as $key => $value) {
-            $result[$prefix . $key] = $value;
+            $prefixedKey = $prefix . $key;
+
+            if (is_array($value) && $this->isAssociative($value)) {
+                $result = array_merge($result, $this->prefixKeys($value, $prefixedKey . '.'));
+            } else {
+                $result[$prefixedKey] = $value;
+            }
         }
 
         return $result;
+    }
+
+    private function isAssociative(array $array): bool
+    {
+        if (empty($array)) {
+            return false;
+        }
+
+        return array_keys($array) !== range(0, count($array) - 1);
     }
 
     private function parseFile(string $file): ?array
