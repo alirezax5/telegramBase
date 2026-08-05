@@ -1,0 +1,373 @@
+# TelegramBase
+
+A modular PHP 8.1+ Telegram bot framework built on Illuminate components, with a plugin system, queue backends, session management, middleware pipeline, scheduler, migration runner, and CLI scaffolding.
+
+## Requirements
+
+- PHP 8.1+
+- Composer
+- Extensions: `json`, `mbstring`, `curl`
+- Optional: `redis`, `memcached`, `amqp` (queue/cache backends)
+- Optional: MySQL/MariaDB (database, Eloquent migrations)
+
+## Quick Start
+
+```bash
+git clone https://github.com/alirezax5/telegramBase.git
+cd telegramBase
+cp .env.example .env
+# Set BOT_TOKEN in .env
+php bot.php
+```
+
+## Bot Modes
+
+Set `BOT_MODE` in `.env`:
+
+| Mode | Description |
+|------|-------------|
+| `update_direct` | Long-polling, process inline (default) |
+| `update_queue` | Long-polling, push to queue |
+| `webhook_direct` | Webhook, process inline |
+| `webhook_queue` | Webhook, push to queue |
+| `cronjob_update` | Cron-task polling (single slot) |
+| `cronjob_queue` | Cron-task queue processing (N slots) |
+
+## Folder Structure
+
+```
+├── App/                    # Framework core
+│   ├── Attributes/         # PHP 8 attributes (ChatType)
+│   ├── Bootstrap/          # Boot sequence (Config, Language, Button, Plugins)
+│   ├── Bot/                # BotManager singleton
+│   ├── Button/             # Keyboard helper + Keyboard builder
+│   ├── Cache/              # CacheManager (array/file/redis/memcached/db)
+│   ├── Cli/                # CLI Console + Maker (scaffolding)
+│   ├── Config/             # AppConfig, RetryConfig, SessionConfig, SchedulerConfig
+│   ├── Connection/         # Redis/Memcached/RabbitMQ connection configs
+│   ├── Cron/               # CronManager + CronWorker
+│   ├── Database/           # DatabaseManager, MigrationRunner, Migrations/
+│   ├── Environment/        # EnvHandler + EnvironmentValidator
+│   ├── Enum/               # CoreMode enum
+│   ├── Language/           # i18n loader + helpers (__() )
+│   ├── Logger/             # LogHandler + LoggerConfig
+│   ├── Middleware/          # MiddlewareInterface, Pipeline + RateLimit/AuditLog/AdminGuard
+│   ├── Plugin/             # PluginHandler, PluginInterface, ChatType attribute
+│   ├── Queue/              # QueueManager, RetryQueue, RetryableException
+│   ├── Scheduler/          # Scheduler, ScheduledTask, TaskLock
+│   ├── Session/            # SessionManager, Session (cache-backed)
+│   ├── Storage/            # OffsetStorage, CacheStore, QueueStore
+│   └── Update/             # Fetcher, Processor, WebhookDispatcher
+├── Plugin/                 # Bot plugins (your code)
+├── Button/                 # Keyboard button definitions
+├── Language/               # Translation files (PHP arrays)
+├── Database/Migrations/    # Eloquent migration files
+├── bin/                    # Entry scripts (tgbase CLI, scheduler)
+├── AppData/                # Runtime data (queue, offsets, session, locks)
+├── logs/                   # Log files
+└── bot.php                 # Main entry point
+```
+
+## CLI Commands
+
+```bash
+php bin/tgbase <command> [arguments] [options]
+
+# Scaffolding
+make:plugin  <path>         Create a plugin class (options: --type=private|group|both)
+make:middleware <name>      Create a middleware class
+make:session <name>         Create a session helper
+make:language <code>        Create a language file (e.g. fa, en)
+make:button <code>          Create a button definition file
+make:migration <name>       Create a migration file (timestamped)
+
+# Database
+migrate                     Run pending migrations
+migrate:rollback            Rollback the last batch
+migrate:status              Show migration status
+
+# Utility
+list                        List all available commands
+help                        Show help
+```
+
+## Writing a Plugin
+
+Create a file in `Plugin/` — the framework auto-discovers it:
+
+```php
+<?php
+namespace alirezax5\TelegramBase\Plugin;
+
+use alirezax5\TelegramBase\App\Attributes\ChatType;
+use alirezax5\TelegramBase\App\Plugin\Contract\PluginInterface;
+use telegramBotApiPhp\Telegram;
+
+#[ChatType(['private'])]
+class greet implements PluginInterface
+{
+    public function getPriority(): int { return 10; }
+
+    public function onMessage($message, Telegram $Telegram): void
+    {
+        $chatId = $Telegram->fromId();
+        $text   = $message->text ?? '';
+
+        if ($text === '/start') {
+            $Telegram->sendMessage($chatId, "Welcome!");
+        }
+    }
+}
+```
+
+> `$message` is the message object (not the full update) — use `$message->text`, `$message->chat->id`, etc.
+
+### Handler methods
+
+| Method | Triggered when |
+|--------|---------------|
+| `onMessage` | Any text or media message |
+| `onCallback_query` | Inline button pressed |
+| `onCommand` | Slash command (e.g. `/start`) |
+| `before` | Runs before every update |
+| `after` | Runs after every update |
+
+### Attributes
+
+```php
+#[ChatType(['private', 'group'])]  // Restrict to chat types
+```
+
+## Session
+
+Session state persists between messages, stored via the Cache driver:
+
+```php
+use alirezax5\TelegramBase\App\Session\SessionManager;
+
+// Start or resume session
+$session = SessionManager::start($chatId);
+
+// Set / get values
+$session->set('step', 'waiting_email');
+$step = $session->get('step');
+
+// Persist automatically; TTL set by SESSION_TTL in .env
+```
+
+### Config (.env)
+
+```
+SESSION_TTL=3600
+SESSION_PREFIX="tgbase:session:"
+```
+
+## Keyboard Builder
+
+Build inline or reply keyboards with a fluent API:
+
+```php
+use alirezax5\TelegramBase\App\Button\Keyboard;
+
+// Inline keyboard
+$kb = Keyboard::inline()
+    ->button('Help', 'btn_help')
+    ->button('Settings', 'btn_settings')
+    ->row()
+    ->button('Close', 'btn_close')
+    ->toArray();
+
+$Telegram->sendMessage($chatId, 'Choose:', ['reply_markup' => $kb]);
+
+// Reply keyboard
+$reply = Keyboard::reply()
+    ->button('Option A')
+    ->button('Option B')
+    ->resize()
+    ->oneTime()
+    ->toArray();
+```
+
+## Middleware
+
+Pipeline-based middleware, runs before plugins:
+
+```php
+// App/Middleware/Middlewares/RateLimitMiddleware.php
+// Built-in: RateLimit, AuditLog, AdminGuard
+
+// Custom middleware:
+namespace alirezax5\TelegramBase\App\Middleware;
+
+class MyMiddleware implements MiddlewareInterface {
+    public function handle(mixed $update, \Closure $next, Telegram $tg): mixed {
+        // pre-process
+        $result = $next($update);
+        // post-process
+        return $result;
+    }
+}
+```
+
+### Built-in Middlewares
+
+| Middleware | Purpose |
+|-----------|---------|
+| `RateLimit` | Sliding-window rate limiter per user |
+| `AuditLog` | Logs every incoming update |
+| `AdminGuard` | Restricts to ADMINS_WHITELIST from .env |
+
+## Retry Queue
+
+Automatic retry for failed API calls (429/5xx), with exponential backoff:
+
+```
+attempt 1 → 2s → attempt 2 → 4s → attempt 3 → 8s → drop
+```
+
+### Config (.env)
+
+```
+RETRY_QUEUE_DRIVER="json"   # json or redis
+RETRY_MAX_ATTEMPTS=3
+RETRY_BASE_DELAY=2
+RETRY_MAX_SIZE=1000
+```
+
+## Scheduler
+
+Cron-based task scheduler. Each tick runs `bin/scheduler.php` (e.g. every minute via crontab):
+
+```bash
+* * * * * cd /path/to/project && php bin/scheduler.php
+```
+
+Schedule tasks in `bin/tasks.php`:
+
+```php
+$scheduler->call('prune_old_sessions', '0 3 * * *');  // daily at 3am
+$scheduler->call('send_summary',      '*/5 * * * *'); // every 5 min
+```
+
+## Webhook Mode
+
+Switch to `BOT_MODE=webhook_direct` or `webhook_queue` in .env:
+
+```
+BOT_WEBHOOK_URL="https://yourdomain.com/webhook.php"
+BOT_WEBHOOK_SECRET="optional_secret"
+WEBHOOK_CHECK_IP=true   # verify sender IP is Telegram
+```
+
+`webhook.php` is the entry point — it validates IP + secret token, then dispatches.
+
+## Migration
+
+Database schema management via Illuminate Schema builder:
+
+```bash
+# Create a new migration
+php bin/tgbase make:migration create_users_table
+# → Database/Migrations/2026_08_05_203306_create_users_table.php
+
+# Edit the generated file, then run:
+php bin/tgbase migrate
+
+# Check status
+php bin/tgbase migrate:status
+
+# Rollback last batch
+php bin/tgbase migrate:rollback
+```
+
+Migration file example:
+
+```php
+<?php
+use alirezax5\TelegramBase\App\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+
+return new class extends Migration {
+    public function up(\Illuminate\Database\Schema\Builder $schema): void {
+        $schema->create('users', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->timestamps();
+        });
+    }
+
+    public function down(\Illuminate\Database\Schema\Builder $schema): void {
+        $schema->dropIfExists('users');
+    }
+};
+```
+
+### Config (.env)
+
+```
+DATABASE_ENABLE=true
+DB_DRIVER="mysql"
+DB_HOST="127.0.0.1"
+DB_PORT=3306
+DB_DATABASE=""
+DB_USERNAME=""
+DB_PASSWORD=""
+```
+
+## Queue Backends
+
+| Driver | Env Setting | Use Case |
+|--------|------------|----------|
+| JSON | `json` | Default, file-based, no dependencies |
+| Redis | `redis` | High throughput, requires `redis` extension |
+| Memcached | `memcached` | Distributed, requires `memcached` |
+| RabbitMQ | `rabbitmq` | Enterprise messaging, requires `amqp` |
+
+## Cache Drivers
+
+| Driver | Env Setting | Notes |
+|--------|------------|-------|
+| Array | `array` | In-memory, per-process (default) |
+| File | `file` | Persistent, uses CACHE_PATH |
+| Redis | `redis` | Shared, high-performance |
+| Memcached | `memcached` | Distributed cache |
+| Database | `database` | MySQL/MariaDB table-backed |
+
+## Configuration
+
+All configuration via `.env`. Key groups:
+
+| Group | Keys |
+|-------|------|
+| Bot | `BOT_TOKEN`, `BOT_MODE`, `POLLING_*`, `WEBHOOK_*` |
+| Plugins | `PLUGINS_DIR`, `PLUGIN_CACHE_ENABLED`, `PLUGINS_RELOAD_INTERVAL` |
+| Language | `LANG_DRIVER`, `DEFAULT_LANG`, `LANG_DIR` |
+| Buttons | `BUTTONS_DIR`, `BUTTONS_FILE`, `BUTTONS_CACHE_TTL` |
+| Queue | `QUEUE_SAVE_TYPE`, `RETRY_QUEUE_DRIVER`, `RETRY_*` |
+| Cache | `CACHE_DRIVER`, `CACHE_PREFIX`, `CACHE_PATH` |
+| Session | `SESSION_TTL`, `SESSION_PREFIX` |
+| Scheduler | `SCHEDULER_LOCK_TTL`, `SCHEDULER_LOCK_TABLE` |
+| Database | `DATABASE_ENABLE`, `DB_*` |
+| Logging | `LOG_ENABLED`, `LOG_LEVEL`, `LOG_DIR` |
+
+See `.env.example` for full list with defaults.
+
+## Illuminate Components
+
+This framework reuses (not forks) these Laravel/Illuminate packages:
+
+| Package | Used for |
+|---------|----------|
+| `illuminate/cache` | Session, plugin cache, language cache, queue locks |
+| `illuminate/database` | Eloquent ORM, Schema builder, migrations |
+| `illuminate/pipeline` | Middleware pipeline |
+| `illuminate/filesystem` | File-based cache, filesystem utilities |
+| `illuminate/support` | Helpers, collections, Carbon, higher-order helpers |
+| `illuminate/contracts` | Interfaces (Cache, Queue, Connection) |
+| `illuminate/redis` | Redis cache/queue driver |
+| `illuminate/events` | Event dispatcher (optional) |
+| `illuminate/bus` | Task dispatch (optional) |
+
+## License
+
+MIT

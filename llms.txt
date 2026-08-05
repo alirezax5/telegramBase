@@ -1,0 +1,66 @@
+# TeleBase (Telegram Base Framework)
+
+> Mini PHP 8.1+ framework for Telegram bot development — plugin system, queue backends, i18n, caching, sessions, middleware, scheduler, webhooks, migrations, and CLI scaffolding. Built on Illuminate (Laravel) components, no reinventing the wheel.
+
+## How to use this documentation
+
+This file indexes the project documentation. For the full context file (recommended for LLMs that need the complete picture), read [llms-ctx.txt](llms-ctx.txt) — it contains the entire README inlined. The source of truth is [README.md](README.md).
+
+## Key facts
+
+- Language: PHP 8.1+, Composer, extensions `json`, `mbstring`, `curl`
+- Entry point: `php bot.php` (long-polling by default)
+- Modes: `update_direct`, `update_queue`, `webhook_direct`, `webhook_queue`, `cronjob_update`, `cronjob_queue` (via `BOT_MODE` in `.env`)
+- Plugins live in `Plugin/`, auto-discovered, PHP 8 attributes for chat-type filtering
+- Sessions, language, buttons, plugin metadata cached through `illuminate/cache`
+- Database: MySQL/MariaDB via Eloquent ORM + schema migrations
+- CLI: `php bin/tgbase` — scaffolding (make:plugin/middleware/language/button/migration) + migrate/migrate:rollback/migrate:status
+
+## Documentation
+
+- [README.md](README.md): Full framework documentation — quick start, bot modes, folder structure, plugin authoring, every feature, config reference, Illuminate component mapping
+- [llms-ctx.txt](llms-ctx.txt): Single-file flattened context (full README content) for LLM ingestion
+
+## Architecture (file map)
+
+- [App/](App/): Framework core — see README folder-structure section
+- [App/Attributes/](App/Attributes/): PHP 8 attributes (e.g. `ChatType`)
+- [App/Bootstrap/](App/Bootstrap/): Boot sequence — config, language, buttons, plugins
+- [App/Bot/](App/Bot/): BotManager singleton (Telegram API instance)
+- [App/Button/](App/Button/): ButtonManager + fluent Keyboard builder
+- [App/Cache/](App/Cache/): CacheManager — array/file/redis/memcached/database drivers
+- [App/Cli/](App/Cli/): CLI Console + Maker + stubs (scaffolding commands)
+- [App/Config/](App/Config/): Typed config objects (App, Session, Scheduler, Retry, ...)
+- [App/Connection/](App/Connection/): Redis / Memcached / RabbitMQ connection configs
+- [App/Cron/](App/Cron/): CronManager + CronWorker (cron-friendly tick processing)
+- [App/Database/](App/Database/): DatabaseManager, MigrationRunner, migration base class
+- [App/Environment/](App/Environment/): EnvHandler (.env loader) + EnvironmentValidator
+- [App/Enum/](App/Enum/): CoreMode enum
+- [App/Language/](App/Language/): i18n loader + `__()` helper
+- [App/Logger/](App/Logger/): LogHandler + LoggerConfig
+- [App/Middleware/](App/Middleware/): MiddlewareInterface + Illuminate Pipeline + RateLimit/AuditLog/AdminGuard
+- [App/Plugin/](App/Plugin/): PluginHandler (discovery + dispatch), PluginInterface
+- [App/Queue/](App/Queue/): QueueManager (json/redis/rabbitmq/memcached) + RetryQueue + RetryableException
+- [App/Scheduler/](App/Scheduler/): Scheduler + ScheduledTask (cron expressions) + TaskLock
+- [App/Session/](App/Session/): Session + SessionManager (cache-backed, TTL)
+- [App/Storage/](App/Storage/): OffsetStorage, cache/queue stores
+- [App/Update/](App/Update/): Fetcher (long-polling), Processor (update dispatch), PollingLoop, WebhookDispatcher
+- [Database/Migrations/](Database/Migrations/): Eloquent migration files (run via CLI)
+- [Plugin/](Plugin/): User bot plugins (the code you write)
+- [Button/](Button/): Keyboard button definition files (i18n labels)
+- [Language/](Language/): Translation arrays (default `fa`)
+- [bin/](bin/): Entry scripts — `tgbase` CLI, `scheduler.php` (cron), `tasks.php` (task registry)
+- [tests/](tests/): smoke + pipeline tests
+
+## Key workflows
+
+1. **Scaffold a plugin**: `php bin/tgbase make:plugin users/register --type=private`
+2. **Scaffold a middleware**: `php bin/tgbase make:middleware RateLimit`
+3. **Create + run a migration**: `php bin/tgbase make:migration create_users_table` → edit → `php bin/tgbase migrate`
+4. **Roll back a batch**: `php bin/tgbase migrate:rollback`
+5. **Schedule a task**: register in `bin/tasks.php`, cron `* * * * * php bin/scheduler.php`
+6. **Switch to webhook**: set `BOT_MODE=webhook_direct`, point `BOT_WEBHOOK_URL` at `webhook.php`
+
+## Optional
+
+- Full config keys with defaults: see `.env.example` (bot, plugins, language, buttons, queue, cache, session, scheduler, retry, database, redis, rabbitmq, memcached, logging sections)
