@@ -94,6 +94,9 @@ final class Paths
     // Ensure system
     // =========================================================
 
+    /**
+     * Create all required application directories (if missing).
+     */
     public static function ensureDirectories(): void
     {
         $dirs = [
@@ -108,6 +111,11 @@ final class Paths
         }
     }
 
+    /**
+     * Create a single directory if missing.
+     *
+     * @param string $dir Absolute path to create
+     */
     private static function ensureDirectory(string $dir): void
     {
         if (!self::$filesystem) {
@@ -115,7 +123,7 @@ final class Paths
         }
 
         if (!self::$filesystem->exists($dir)) {
-            self::$filesystem->mkdir($dir, 0777);
+            self::$filesystem->mkdir($dir, 0755);
         }
     }
 }

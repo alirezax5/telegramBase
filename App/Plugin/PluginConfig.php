@@ -10,10 +10,10 @@ use alirezax5\TelegramBase\App\Paths;
 final  class PluginConfig
 {
     public function __construct(
-        public string $path,
-        public int $reloadInterval,
-        public bool $cacheEnabled,
-        public bool $autoReload,
+        public readonly string $path,
+        public readonly int $reloadInterval,
+        public readonly bool $cacheEnabled,
+        public readonly bool $autoReload,
     ) {}
 
     public static function fromEnv(): self

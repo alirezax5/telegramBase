@@ -2,6 +2,12 @@
 
 use alirezax5\TelegramBase\App\Environment\EnvHandler;
 
+/**
+ * Database connection definitions for Eloquent.
+ *
+ * Loaded by AppConfigFactory::createDatabaseConfig() when present.
+ * The 'main' connection is the default used by Models.
+ */
 return [
     'default' => 'main',
     'connections' => [

@@ -19,10 +19,12 @@ class LogHandler
 
     public static function init(): void
     {
-        $config = Config::logger();
         if (self::$logger !== null || self::$enabled) {
+            self::$enabled = true;
             return;
         }
+
+        $config = Config::logger();
 
         self::$enabled = $config->enabled;
 
@@ -37,9 +39,17 @@ class LogHandler
 
             self::$logger = new Logger('AppLogger');
 
+            $level = EnvHandler::get('LOG_LEVEL', 'debug');
+
             $handler = new StreamHandler(
                 $config->fullPath(),
-                Logger::DEBUG
+                match (strtolower($level)) {
+                    'error' => Logger::ERROR,
+                    'warning' => Logger::WARNING,
+                    'info' => Logger::INFO,
+                    'debug' => Logger::DEBUG,
+                    default => Logger::DEBUG,
+                }
             );
 
             $handler->setFormatter(
@@ -73,7 +83,7 @@ class LogHandler
         try {
             self::$logger->log(strtolower($level), $message, $context);
         } catch (\Throwable) {
-            // هیچ خطایی نباید به اپلیکیشن سرایت کند
+            // Never propagate logger errors to the application
         }
     }
 

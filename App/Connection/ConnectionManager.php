@@ -48,12 +48,18 @@ final class ConnectionManager
     private function isRedisAlive(): bool
     {
         try {
-            return $this->redis?->ping() === true;
+            $pong = $this->redis?->ping();
+            // phpredis may return true (new versions) or '+PONG' string (older versions)
+            $this->redisAlive = ($pong === true || strtoupper((string)$pong) === '+PONG');
+            return $this->redisAlive;
         } catch (Throwable) {
             $this->redis = null;
+            $this->redisAlive = false;
             return false;
         }
     }
+
+    private bool $redisAlive = false;
 
     private function createRedis(): ?Redis
     {
@@ -121,6 +127,12 @@ final class ConnectionManager
                 }
             }
 
+            // Liveness check — Memcached::getVersion() returns false on failure
+            if (!$mc->getVersion()) {
+                LogHandler::error("❌ Memcached ping failed");
+                return null;
+            }
+
             LogHandler::info("✅ Memcached connected");
             return $mc;
 
@@ -153,7 +165,13 @@ final class ConnectionManager
                 $cfg->port,
                 $cfg->user,
                 $cfg->password,
-                $cfg->vhost
+                $cfg->vhost,
+                false,       // insist
+                'default',   // login_method
+                null,        // login_response
+                'en_US',     // locale
+                3.0,         // connection_timeout
+                3.0          // read_write_timeout (heartbeat interval)
             );
 
             LogHandler::info("✅ RabbitMQ connected");

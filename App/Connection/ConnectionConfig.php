@@ -9,9 +9,9 @@ use alirezax5\TelegramBase\App\Environment\EnvHandler;
 final  class ConnectionConfig
 {
     public function __construct(
-        public RedisConfig $redis,
-        public MemcachedConfig $memcached,
-        public RabbitMQConfig $rabbitmq,
+        public readonly RedisConfig $redis,
+        public readonly MemcachedConfig $memcached,
+        public readonly RabbitMQConfig $rabbitmq,
     ) {}
 
     public static function fromEnv(): self

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Update;
 
 use alirezax5\TelegramBase\App\Logger\LogHandler;
@@ -31,9 +33,6 @@ class PollingLoop
         LogHandler::info('Polling stopped');
     }
 
-    /**
-     * Main loop
-     */
     private function runLoop(): void
     {
         while (!$this->shouldStop) {
@@ -61,9 +60,6 @@ class PollingLoop
         }
     }
 
-    /**
-     * Batch handling with per-update offset confirmation
-     */
     private function handleBatch($updates): void
     {
         $this->processor->handleBatch(
@@ -79,7 +75,10 @@ class PollingLoop
     }
 
     /**
-     * Maintenance logic isolated
+     * Periodic maintenance: force GC + filesystem stat cache purge.
+     *
+     * Shared plugin state and missing-language-key queues are flushed so
+     * long-running loops do not accumulate memory.
      */
     private function maintenance(): void
     {
@@ -96,9 +95,6 @@ class PollingLoop
         }
     }
 
-    /**
-     * Signal handling
-     */
     private function registerSignalHandler(): void
     {
         if (!function_exists('pcntl_signal')) {

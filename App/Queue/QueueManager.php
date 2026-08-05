@@ -19,15 +19,9 @@ class QueueManager
 
     private int $maxRetries;
     private int $retryDelay;
+    private int $maxSize;
 
     private int $retryCount = 0;
-
-    private const DRIVER_MAP = [
-        'redis' => RedisQueue::class,
-        'rabbitmq' => RabbitQueue::class,
-        'memcached' => MemcachedQueue::class,
-        'json' => JsonQueue::class,
-    ];
 
     public function __construct(QueueConfig $config)
     {
@@ -41,8 +35,9 @@ class QueueManager
 
         $this->driverType = $config->type;
 
-        $this->maxRetries = $config->maxRetries;
-        $this->retryDelay = $config->retryDelay;
+        $this->maxRetries = max(1, $config->maxRetries);
+        $this->retryDelay = max(1, $config->retryDelay);
+        $this->maxSize = max(0, $config->maxSize);
 
         $this->driver = $this->createDriverSafely();
 
@@ -78,10 +73,25 @@ class QueueManager
     }
 
     /**
-     * PUSH (optimized retry)
+     * PUSH with retry + queue size guard.
+     *
+     * The guard prevents unbounded queue growth when workers are down:
+     * once maxSize is reached, pushes are rejected instead of filling
+     * the disk/RAM until the process is killed.
+     *
+     * @param mixed $update Telegram update
+     * @return bool True when pushed
      */
     public function push(mixed $update): bool
     {
+        if ($this->maxSize > 0 && $this->count() >= $this->maxSize) {
+            LogHandler::warning(
+                "⛔ Queue full ({$this->maxSize}), update rejected"
+            );
+
+            return false;
+        }
+
         if (!$this->isConnected() && !$this->reconnect()) {
             return false;
         }
@@ -102,13 +112,16 @@ class QueueManager
     }
 
     /**
-     * Unified retry engine (IMPORTANT improvement)
+     * Unified retry engine with exponential backoff
+     * @param callable $callback Operation to retry
+     * @param string $action Human-readable action name for logging
+     * @param mixed $context Debug context for error reporting
      */
-    private function executeWithRetry(callable $callback, string $action,  $context = []): mixed
+    private function executeWithRetry(callable $callback, string $action, mixed $context = []): mixed
     {
         $attempt = 0;
 
-        while ($attempt <= $this->maxRetries) {
+        while (true) {
             try {
                 $result = $callback();
 
@@ -118,8 +131,6 @@ class QueueManager
             } catch (\Throwable $e) {
                 $attempt++;
                 $this->retryCount = $attempt;
-
-                LogHandler::warning("⚠️ {$action} failed (try {$attempt}/{$this->maxRetries})");
 
                 if ($attempt > $this->maxRetries) {
                     LogHandler::error("⛔ {$action} max retries reached", [
@@ -131,31 +142,35 @@ class QueueManager
                     return $action === 'pop' ? null : false;
                 }
 
+                LogHandler::warning("⚠️ {$action} failed (try {$attempt}/{$this->maxRetries})");
                 usleep($this->retryDelay * 1_000_000);
             }
         }
-
-        return $action === 'pop' ? null : false;
     }
 
     /**
-     * Batch push (optimized)
+     * Batch push (optimized).
+     *
+     * @param array $updates List of updates
+     * @return int Number of successfully pushed updates
      */
     public function pushBatch(array $updates): int
     {
         $success = 0;
+
+        $total = count($updates);
 
         foreach ($updates as $i => $update) {
             if ($this->push($update)) {
                 $success++;
             }
 
-            if ($i % 100 === 0 && $i > 0) {
-                LogHandler::debug("📦 batch progress: {$i}");
+            if ($total >= 100 && $i % 100 === 0 && $i > 0) {
+                LogHandler::debug("📦 batch progress: {$i}/{$total}");
             }
         }
 
-        LogHandler::info("📤 batch push: {$success}/" . count($updates));
+        LogHandler::info("📤 batch push: {$success}/{$total}");
 
         return $success;
     }
@@ -168,7 +183,7 @@ class QueueManager
         $items = [];
 
         for ($i = 0; $i < $limit; $i++) {
-            $item = $this->pop();
+            $item = $this->pop(5); // 5-second timeout prevents indefinite block on Redis blPop
 
             if ($item === null) {
                 break;
@@ -253,6 +268,7 @@ class QueueManager
             'driver' => $this->driverType,
             'connected' => $this->isConnected(),
             'size' => $this->count(),
+            'max_size' => $this->maxSize,
             'retry_count' => $this->retryCount,
             'max_retries' => $this->maxRetries,
             'retry_delay' => $this->retryDelay,

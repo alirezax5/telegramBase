@@ -1,12 +1,16 @@
 <?php
+
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Connection;
+
 final  class RabbitMQConfig
 {
     public function __construct(
-        public string $host,
-        public int $port,
-        public string $user,
-        public string $password,
-        public string $vhost,
+        public readonly string $host,
+        public readonly int $port,
+        public readonly string $user,
+        public readonly string $password,
+        public readonly string $vhost,
     ) {}
 }

@@ -5,14 +5,18 @@ declare(strict_types=1);
 namespace alirezax5\TelegramBase\App\Logger;
 
 use alirezax5\TelegramBase\App\Environment\EnvHandler;
+use alirezax5\TelegramBase\App\Paths;
+use Symfony\Component\Filesystem\Path;
 
 final  class LoggerConfig
 {
     public function __construct(
-        public bool $enabled,
-        public string $directory,
-        public string $file,
-    ) {}
+        public readonly bool $enabled,
+        public readonly string $directory,
+        public readonly string $file,
+    ) {
+        $this->validate();
+    }
 
     public static function fromEnv(): self
     {
@@ -26,6 +30,31 @@ final  class LoggerConfig
         );
     }
 
+    /**
+     * Validate log path configuration.
+     *
+     * Guards against absolute paths and directory traversal
+     * (e.g. LOG_DIR=../../etc), which would let an env change write
+     * log files outside the project.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function validate(): void
+    {
+        if (Path::isAbsolute($this->directory) || Path::isAbsolute($this->file)) {
+            throw new \InvalidArgumentException('LOG_DIR and LOG_FILE must be relative paths.');
+        }
+
+        $dir = str_replace('\\', '/', $this->directory);
+
+        if (str_contains($dir, '..')) {
+            throw new \InvalidArgumentException('LOG_DIR must not contain "..".');
+        }
+    }
+
+    /**
+     * Full path of the log file (relative to the project base).
+     */
     public function fullPath(): string
     {
         return $this->directory . DIRECTORY_SEPARATOR . $this->file;

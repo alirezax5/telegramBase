@@ -10,8 +10,8 @@ final  class CronConfig
 {
     public function __construct(
 
-        public int $cronMaxTime,
-        public int $cronWorker,
+        public readonly int $cronMaxTime,
+        public readonly int $cronWorker,
     )
     {
     }

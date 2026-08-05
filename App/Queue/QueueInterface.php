@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Queue;
 
 interface QueueInterface

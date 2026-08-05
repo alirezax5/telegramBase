@@ -9,10 +9,10 @@ use alirezax5\TelegramBase\App\Environment\EnvHandler;
 final  class LanguageConfig
 {
     public function __construct(
-        public string $driver,
-        public string $defaultLang,
-        public string $dir,
-        public int $cacheTTL,
+        public readonly string $driver,
+        public readonly string $defaultLang,
+        public readonly string $dir,
+        public readonly int $cacheTTL,
     ) {}
 
     public static function fromEnv(): self

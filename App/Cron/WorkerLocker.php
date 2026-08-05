@@ -1,11 +1,22 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Cron;
 
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Paths;
 class WorkerLocker
 {
+    /**
+     * Try to acquire one of the free worker slot locks.
+     *
+     * A flock() is taken per slot, so concurrent cron processes cannot
+     * run the same worker twice. Returns a slot handle + id on success.
+     *
+     * @param int $maxWorkers Total number of available slots
+     * @return array{handle:resource, workerId:int}|null Acquired slot, or null when all busy
+     */
     public function acquire(int $maxWorkers): ?array
     {
         $dir = Paths::cronSlotsDirectory();
@@ -39,6 +50,12 @@ class WorkerLocker
         return null;
     }
 
+    /**
+     * Release an acquired worker slot lock.
+     *
+     * @param resource $handle   File handle from acquire()
+     * @param int      $workerId Slot number
+     */
     public function release($handle, int $workerId): void
     {
         flock($handle, LOCK_UN);

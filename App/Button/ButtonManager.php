@@ -148,6 +148,7 @@ final class ButtonManager
         $btn = self::$buttons[$name] ?? null;
 
         if (!$btn) {
+            LogHandler::debug("Button not found: {$name}");
             return null;
         }
 

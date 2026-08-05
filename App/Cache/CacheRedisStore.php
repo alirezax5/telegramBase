@@ -7,7 +7,7 @@ namespace alirezax5\TelegramBase\App\Cache;
 use Illuminate\Contracts\Cache\Store;
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 
-class CachRedisStore implements Store
+class CacheRedisStore implements Store
 {
     private $redis;
     private string $prefix;
@@ -31,10 +31,10 @@ class CachRedisStore implements Store
             return null;
         }
 
-        $result = @unserialize($value);
+        $result = json_decode($value, true);
 
-        if ($result === false && $value !== 'b:0;') {
-            LogHandler::warning("Failed to unserialize cache key: {$key}");
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            LogHandler::warning("Failed to decode cache key: {$key}");
             return null;
         }
 
@@ -62,8 +62,8 @@ class CachRedisStore implements Store
                 continue;
             }
 
-            $unserialized = @unserialize($val);
-            $results[$keys[$idx]] = ($unserialized === false && $val !== 'b:0;') ? null : $unserialized;
+            $decoded = json_decode($val, true);
+            $results[$keys[$idx]] = (json_last_error() === JSON_ERROR_NONE) ? $decoded : null;
         }
 
         return $results;
@@ -74,7 +74,7 @@ class CachRedisStore implements Store
         return (bool) $this->redis->setex(
             $this->key((string) $key),
             (int) $seconds,
-            serialize($value)
+            json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         );
     }
 
@@ -91,7 +91,7 @@ class CachRedisStore implements Store
             $this->redis->setex(
                 $this->key((string) $key),
                 $ttl,
-                serialize($value)
+                json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
             );
         }
         $result = $this->redis->exec();
@@ -113,7 +113,7 @@ class CachRedisStore implements Store
     {
         return (bool) $this->redis->set(
             $this->key((string) $key),
-            serialize($value)
+            json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         );
     }
 
@@ -123,10 +123,16 @@ class CachRedisStore implements Store
     }
 
     /**
-     * Flush all keys with the current prefix (SCAN-based, production-safe)
+     * Flush all keys with the current prefix (SCAN-based, production-safe).
+     * Guarded: if prefix empty, refuses to avoid nuking entire Redis DB.
      */
     public function flush(): bool
     {
+        if ($this->prefix === '') {
+            LogHandler::warning('CacheRedisStore: flush denied — empty prefix would wipe entire Redis DB');
+            return false;
+        }
+
         $pattern = $this->prefix . '*';
         $iterator = null;
 

@@ -1,0 +1,14 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/../vendor/autoload.php';
+
+use alirezax5\TelegramBase\App\Paths;
+use alirezax5\TelegramBase\Cli\Console;
+
+Paths::initialize(__DIR__ . '/..');
+
+$console = new Console($argv);
+exit($console->run());

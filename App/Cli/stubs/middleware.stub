@@ -1,0 +1,16 @@
+<?php
+
+declare(strict_types=1);
+
+namespace alirezax5\TelegramBase\App\Middleware\Middlewares;
+
+use alirezax5\TelegramBase\App\Middleware\MiddlewareInterface;
+use telegramBotApiPhp\Telegram;
+
+final class {{CLASS}} implements MiddlewareInterface
+{
+    public function handle(object $update, Telegram $Telegram, callable $next): mixed
+    {
+        return $next();
+    }
+}

@@ -1,8 +1,8 @@
 <?php
 
-namespace alirezax5\TelegramBase\App\Cron;
+declare(strict_types=1);
 
-use \Throwable;
+namespace alirezax5\TelegramBase\App\Cron;
 
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Paths;
@@ -34,7 +34,7 @@ class CronWorker
 
             $callback();
 
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
 
             LogHandler::error(
                 "❌ Worker #{$workerId} fatal error: "

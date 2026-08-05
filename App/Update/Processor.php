@@ -1,28 +1,40 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Update;
 
 use alirezax5\TelegramBase\App\Config\Config;
+use alirezax5\TelegramBase\App\Environment\EnvHandler;
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Plugin\PluginHandler;
+use alirezax5\TelegramBase\App\Queue\RetryQueue;
+use alirezax5\TelegramBase\App\Queue\RetryableException;
 use telegramBotApiPhp\Telegram;
 
 class Processor
 {
     private ?PluginHandler $pluginHandler;
     private Telegram $Telegram;
+    private ?RetryQueue $retryQueue = null;
+    private bool $retryEnabled;
 
     public function __construct(?PluginHandler $pluginHandler, Telegram $Telegram)
     {
         $this->pluginHandler = $pluginHandler;
         $this->Telegram = $Telegram;
+        $this->retryEnabled = (bool)EnvHandler::get('RETRY_ENABLED', true);
     }
 
-    /*
-     * اجرای چند آپدیت
-     *  موقع اجرا حالت updates اجرا میشه
+    /**
+     * Handle a batch of updates sequentially.
+     *
+     * Used by PollingLoop and queue worker.
+     *
+     * @param iterable    $updates  Collection of updates
+     * @param callable|null $afterEach Optional callback invoked after each update
      */
-    public function handleBatch($updates, ?callable $afterEach = null): void
+    public function handleBatch(iterable $updates, ?callable $afterEach = null): void
     {
         foreach ($updates as $update) {
 
@@ -34,17 +46,21 @@ class Processor
         }
     }
 
-    /*
-     * اجرا و ست اپدیت ها
+    /**
+     * Handle a single update: set input data and dispatch to plugins.
+     *
+     * @param mixed $update Telegram update (object or raw array)
      */
-    public function handle($update): void
+    public function handle(mixed $update): void
     {
         if (empty($update)) {
             return;
         }
+
         if (is_array($update)) {
-            $update = $this->toObject($update);   // تابع کمکی
+            $update = $this->toObject($update);
         }
+
         try {
 
             $this->Telegram->setInputData($update);
@@ -59,48 +75,56 @@ class Processor
 
                 'update_id' => $update->update_id ?? null,
             ]);
+
+            // Transient failures (rate limit, 5xx, timeouts) go to the
+            // retry queue so the update is not lost permanently.
+            if ($this->retryEnabled && RetryableException::isRetryable($e)) {
+                $this->retryQueue()?->push($update, $e->getMessage());
+            }
         }
     }
 
+    /**
+     * Convert an associative array to a stdClass object (recursively).
+     *
+     * @param mixed $data Raw update payload
+     * @return object Converted object
+     */
     private function toObject(mixed $data): object
     {
-        if (is_object($data)) return $data;
+        if (is_object($data)) {
+            return $data;
+        }
 
         if (!is_array($data)) {
             return (object)[];
         }
 
-        return self::arrayToObject($data);
-    }
-
-    private function arrayToObject(array $data): object
-    {
         $result = [];
 
         foreach ($data as $key => $value) {
-            $result[$key] = is_array($value) ? self::arrayToObject($value) : $value;
+            $result[$key] = is_array($value) ? $this->toObject($value) : $value;
         }
 
         return (object)$result;
     }
 
-    /*
-     * اجرای پلاگین ها و پاس دادن اپدیت ها به آنها
+    /**
+     * Dispatch the update to all matching plugins.
+     *
+     * @param object $update Telegram update object
      */
-    private function runPlugins($update): void
+    private function runPlugins(object $update): void
     {
         if ($this->pluginHandler === null) {
             return;
         }
-
-        $start = 0;
 
         $debug = Config::bot()->appDebug;
 
         if ($debug) {
             $start = microtime(true);
         }
-
 
         $this->pluginHandler->runAll($update, $this->Telegram);
 
@@ -115,8 +139,23 @@ class Processor
         }
     }
 
-    /*
-     *  ا جرای وبهوک
+    /**
+     * Lazy-init the retry queue.
+     */
+    private function retryQueue(): ?RetryQueue
+    {
+        if ($this->retryQueue === null) {
+            try {
+                $this->retryQueue = new RetryQueue();
+            } catch (\Throwable) {
+                $this->retryQueue = null;
+            }
+        }
+        return $this->retryQueue;
+    }
+
+    /**
+     * Handle webhook input directly.
      */
     public function handleWebhook(): void
     {

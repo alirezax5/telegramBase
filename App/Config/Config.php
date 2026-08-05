@@ -14,6 +14,9 @@ use alirezax5\TelegramBase\App\Language\LanguageConfig;
 use alirezax5\TelegramBase\App\Logger\LoggerConfig;
 use alirezax5\TelegramBase\App\Plugin\PluginConfig;
 use alirezax5\TelegramBase\App\Queue\QueueConfig;
+use alirezax5\TelegramBase\App\Queue\RetryConfig;
+use alirezax5\TelegramBase\App\Scheduler\SchedulerConfig;
+use alirezax5\TelegramBase\App\Config\SessionConfig;
 
 /**
  * Static facade for accessing application configuration.
@@ -45,6 +48,11 @@ final class Config
         return self::$appConfig->queue;
     }
 
+    public static function retry(): RetryConfig
+    {
+        return self::$appConfig->retry;
+    }
+
     public static function connection(): ConnectionConfig
     {
         return self::$appConfig->connection;
@@ -73,6 +81,16 @@ final class Config
     public static function cron(): CronConfig
     {
         return self::$appConfig->cron;
+    }
+
+    public static function scheduler(): SchedulerConfig
+    {
+        return self::$appConfig->scheduler;
+    }
+
+    public static function session(): SessionConfig
+    {
+        return self::$appConfig->session;
     }
 
     public static function database(): DatabaseConfig

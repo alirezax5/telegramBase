@@ -99,6 +99,16 @@ class RabbitQueue implements QueueInterface
         }
     }
 
+    /**
+     * POP a message from the RabbitMQ queue.
+     *
+     * Delivery is acknowledged only after the payload decodes to a valid
+     * array; a corrupted message is acknowledged (discarded) to avoid
+     * redelivery loops.
+     *
+     * @param int $timeout Ignored — RabbitMQ has no blocking-scan pop
+     * @return array|null Decoded update array or null when empty
+     */
     public function pop(int $timeout = 0): ?array
     {
         if (!$this->reconnectIfNeeded()) return null;
@@ -110,14 +120,14 @@ class RabbitQueue implements QueueInterface
                 return null;
             }
 
-            $data = json_decode($msg->body, true);
-
             $deliveryTag = $msg->delivery_info['delivery_tag'] ?? null;
 
             if (!$deliveryTag) {
                 LogHandler::error("Missing delivery tag");
                 return null;
             }
+
+            $data = json_decode($msg->body, true);
 
             if (!is_array($data)) {
                 $this->channel->basic_ack($deliveryTag);
@@ -127,7 +137,6 @@ class RabbitQueue implements QueueInterface
             $this->channel->basic_ack($deliveryTag);
 
             return $data;
-
         } catch (\Throwable $e) {
             LogHandler::error("❌ RabbitMQ pop failed: {$e->getMessage()}");
             return null;

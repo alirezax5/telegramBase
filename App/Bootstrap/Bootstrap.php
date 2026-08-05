@@ -7,6 +7,7 @@ namespace alirezax5\TelegramBase\App\Bootstrap;
 use alirezax5\TelegramBase\App\Cache\CacheManager;
 use alirezax5\TelegramBase\App\Config\Config;
 use alirezax5\TelegramBase\App\Database\DatabaseManager;
+use alirezax5\TelegramBase\App\Environment\EnvironmentValidator;
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Paths;
 use alirezax5\TelegramBase\App\Config\AppConfigFactory;
@@ -20,6 +21,11 @@ final class Bootstrap
         Paths::initialize(dirname(__DIR__, 2));
         Paths::ensureDirectories();
         EnvironmentBootstrap::boot();
+
+        // EnvironmentValidator ALWAYS runs — not gated on APP_DEBUG.
+        // Missing/invalid BOT_TOKEN or BOT_MODE is a runtime error regardless.
+        (new EnvironmentValidator())->validate();
+
         $config = AppConfigFactory::create();
         Config::init($config);
         LogHandler::init();

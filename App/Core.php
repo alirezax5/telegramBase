@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App;
 
 use alirezax5\TelegramBase\App\Bootstrap\Bootstrap;
@@ -47,11 +49,6 @@ class Core
         $this->Telegram = BotManager::getInstance()->get();
     }
 
-    public function bot(?string $name = null): Telegram
-    {
-        return BotManager::getInstance()->get($name);
-    }
-
     public function run(): void
     {
         try {
@@ -60,12 +57,11 @@ class Core
 
                 case 'update_queue':
                 case 'webhook_queue':
-                    $this->queueWorker()->startInfinite();
+                    $this->queueWorker()?->startInfinite();
                     break;
 
                 case 'webhook_direct':
-                    $this->processor()->handleWebhook();
-                    $this->cleanup();
+                    $this->webhookDispatcher()->dispatch();
                     break;
 
                 case 'cronjob_update':
@@ -78,7 +74,7 @@ class Core
                 case 'cronjob_queue':
                     $this->cronManager->run(
                         Config::cron()->cronWorker,
-                        fn() => $this->queueWorker()->runLimited(
+                        fn() => $this->queueWorker()?->runLimited(
                             Config::cron()->cronMaxTime
                         )
                     );
@@ -96,6 +92,14 @@ class Core
         }
     }
 
+    /**
+     * Run the update-fetch phase (polling or webhook) and push updates
+     * into the configured queue.
+     *
+     * - webhook_queue mode: reads the raw webhook payload once and pushes it.
+     * - other queue modes: long-polls Telegram for new updates and pushes
+     *   each one, advancing the local offset only on successful push.
+     */
     public function runFetchQueueUpdate(): void
     {
         if (Config::bot()->mode === 'webhook_queue') {
@@ -128,6 +132,9 @@ class Core
 
     }
 
+    /**
+     * Clean up per-iteration state (shared data + missing language keys).
+     */
     private function cleanup(): void
     {
         SharedManagement::clear();
@@ -140,6 +147,11 @@ class Core
             $this->pluginHandler,
             $this->Telegram
         );
+    }
+
+    private function webhookDispatcher(): WebhookDispatcher
+    {
+        return new WebhookDispatcher($this->processor());
     }
 
     private function pollingLoop(): PollingLoop

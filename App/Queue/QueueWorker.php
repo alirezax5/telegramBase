@@ -18,8 +18,11 @@ final class QueueWorker
 
     private const BLOCK_TIMEOUT = 5;
     private const CLEANUP_INTERVAL = 100;
+    private const BACKOFF_INITIAL = 1;    // seconds
+    private const BACKOFF_MAX = 60;
 
     private int $processedCount = 0;
+    private int $backoffSec = 0;
 
     public function __construct(
         QueueManager $queue,
@@ -57,9 +60,14 @@ final class QueueWorker
         while ($endTime === null || time() < $endTime) {
             try {
                 if (!$this->queue->isConnected()) {
-                    usleep(500_000);
+                    $this->backoffSec = $this->backoffSec === 0
+                        ? self::BACKOFF_INITIAL
+                        : min($this->backoffSec * 2, self::BACKOFF_MAX);
+                    LogHandler::warning("Queue not connected, backing off {$this->backoffSec}s");
+                    sleep($this->backoffSec);
                     continue;
                 }
+                $this->backoffSec = 0;
 
                 $update = $this->queue->pop(self::BLOCK_TIMEOUT);
 

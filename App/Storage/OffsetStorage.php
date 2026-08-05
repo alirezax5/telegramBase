@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Storage;
 
 use alirezax5\TelegramBase\App\Paths;
@@ -12,6 +14,11 @@ class OffsetStorage
 
     public function __construct()
     {
+        $fileDir = dirname(Paths::lastUpdateFile());
+        if (!is_dir($fileDir)) {
+            mkdir($fileDir, 0755, true);
+        }
+
         $this->filePath = Paths::lastUpdateFile();
         if (!is_file($this->filePath)) {
             file_put_contents($this->filePath, '0');

@@ -19,13 +19,12 @@
     "illuminate/redis": "^10.49"
   },
   "autoload": {
-    "psr-4": {
-      "alirezax5\\TelegramBase\\App\\": "App/",
-      "alirezax5\\TelegramBase\\Plugin\\": "Plugin/",
-      "Database\\": "Database/",
-      "Functions\\": "Functions/",
-      "Migration\\": "Migration/"
-    },
+      "psr-4": {
+          "alirezax5\\TelegramBase\\App\\": "App/",
+          "alirezax5\\TelegramBase\\Cli\\": "App/Cli/",
+          "alirezax5\\TelegramBase\\Plugin\\": "Plugin/",
+          "Database\\": "Database/"
+      },
     "files": [
       "App/Language/helpers.php",
       "App/Button/helper.php"

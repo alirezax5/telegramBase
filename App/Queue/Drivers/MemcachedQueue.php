@@ -9,6 +9,17 @@ use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Queue\QueueInterface;
 use alirezax5\TelegramBase\App\Connection\ConnectionManager;
 
+/**
+ * Memcached-backed queue.
+ *
+ * ⚠️ WARNING: This driver is NOT production-safe.
+ * - No FIFO guarantee under concurrency (cursor-based, not atomic)
+ * - Data loss on Memcached eviction (LRU may drop unprocessed jobs)
+ * - Lock TTL is 1 second — fragile under high load
+ * - No durability — restart wipes queue
+ * Consider RedisQueue or RabbitQueue for production use.
+ */
+
 class MemcachedQueue implements QueueInterface
 {
     protected ?Memcached $memcached;
@@ -121,6 +132,11 @@ class MemcachedQueue implements QueueInterface
         return $count;
     }
 
+    /**
+     * Whether the Memcached connection is usable.
+     *
+     * Uses server list presence as a cheap liveness probe (no network call).
+     */
     public function isConnected(): bool
     {
         return $this->memcached instanceof Memcached

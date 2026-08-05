@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace alirezax5\TelegramBase\App\Queue\Drivers;
 
 use alirezax5\TelegramBase\App\Logger\LogHandler;
@@ -16,6 +18,7 @@ class RedisQueue implements QueueInterface
     private bool $connected = false;
     private float $lastPingAt = 0;
     private const PING_INTERVAL = 5.0;
+    private const JOB_TTL = 86400; // 24h — prevent unbounded growth on crash
 
     public function __construct(array $config)
     {
@@ -31,18 +34,39 @@ class RedisQueue implements QueueInterface
         }
     }
 
-    public function push( $update): bool
+    /**
+     * Push an update onto the queue tail.
+     *
+     * Each element is a structured {payload, ts} JSON so pop() can validate
+     * and survive partial Redis failures without silently losing jobs.
+     *
+     * @param array $update Telegram update array
+     * @return bool True on success
+     */
+    public function push(array $update): bool
     {
         if (!$this->isConnected()) {
             LogHandler::error("Cannot push: Redis not connected.");
             return false;
         }
 
-        return $this->redis->rPush($this->key, json_encode($update, JSON_UNESCAPED_UNICODE)) !== false;
+        $item = json_encode(
+            ['payload' => $update, 'ts' => time()],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+        );
+
+        if ($item === false) {
+            return false;
+        }
+
+        return $this->redis->rPush($this->key, $item) !== false;
     }
 
     /**
-     * POP with optional blocking (blPop) for Redis
+     * POP with optional blocking (blPop) for Redis.
+     *
+     * @param int $timeout Blocking timeout in seconds (0 = non-blocking)
+     * @return array|null Decoded update array, or null when empty/timed out
      */
     public function pop(int $timeout = 0): ?array
     {
@@ -58,12 +82,36 @@ class RedisQueue implements QueueInterface
                 return null;
             }
 
-            $data = json_decode($result[1], true);
-            return is_array($data) ? $data : null;
+            $item = json_decode($result[1], true);
+
+            return $this->extractPayload($item);
         }
 
-        $data = $this->redis->lPop($this->key);
-        return $data ? json_decode($data, true) : null;
+        $item = $this->redis->lPop($this->key);
+
+        if (!$item) {
+            return null;
+        }
+
+        return $this->extractPayload(json_decode($item, true));
+    }
+
+    /**
+     * Extract the update payload from the stored item.
+     *
+     * Legacy plain-array items (pushed before the structured format) are
+     * handled transparently so existing queued data is not lost.
+     *
+     * @param mixed $item Decoded queue element
+     * @return array|null Update array or null when corrupted
+     */
+    private function extractPayload(mixed $item): ?array
+    {
+        if (is_array($item) && isset($item['payload']) && is_array($item['payload'])) {
+            return $item['payload'];
+        }
+
+        return is_array($item) ? $item : null;
     }
 
     public function count(): int

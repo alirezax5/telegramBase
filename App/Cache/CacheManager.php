@@ -126,7 +126,7 @@ final class CacheManager
             self::$tagsSupported = false;
 
             return new Repository(
-                new CachRedisStore($redis, $config->prefix)
+                new CacheRedisStore($redis, $config->prefix)
             );
         } catch (\Throwable $e) {
             LogHandler::warning("Redis cache failed: {$e->getMessage()}");

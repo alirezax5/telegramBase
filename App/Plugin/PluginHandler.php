@@ -10,7 +10,6 @@ use alirezax5\TelegramBase\App\Cache\CacheManager;
 use alirezax5\TelegramBase\App\Environment\EnvHandler;
 use alirezax5\TelegramBase\App\Plugin\Contract\PluginInterface;
 use telegramBotApiPhp\Telegram;
-use ReflectionClass;
 
 class PluginHandler
 {
@@ -26,13 +25,7 @@ class PluginHandler
 
     private const CACHE_KEY_PLUGINS = 'plugin_handler:plugins_index';
 
-    /**
-     * @var array<string,array<int,array{
-     *     class: string,
-     *     priority: int,
-     *     chatTypes: array
-     * }>>
-     */
+    /** @var array<string,array<int,array{class:string,priority:int,chatTypes:array}>> */
     private array $plugins = [];
 
     /** @var array<string,PluginInterface> */
@@ -185,7 +178,7 @@ class PluginHandler
 
     private function indexPlugin(
         PluginInterface $plugin,
-        ReflectionClass $ref,
+        \ReflectionClass $ref,
         string $fqcn
     ): void
     {
@@ -295,13 +288,11 @@ class PluginHandler
 
         $method = 'on' . str_replace(' ', '', ucwords(str_replace('_', ' ', $type)));
 
-        $data = $update->$type ?? null;
-
         $chatType = $Telegram->chatType();
 
-        $this->run('before', $data, $Telegram, $chatType);
-        $this->run($method, $data, $Telegram, $chatType);
-        $this->run('after', $data, $Telegram, $chatType);
+        $this->run('before', $update->$type ?? null, $Telegram, $chatType);
+        $this->run($method, $update->$type ?? null, $Telegram, $chatType);
+        $this->run('after', $update->$type ?? null, $Telegram, $chatType);
     }
 
     private function detectType($update): ?string
@@ -314,9 +305,17 @@ class PluginHandler
         return null;
     }
 
+    /**
+     * Run a plugin hook (before / on{Type} / after) for every registered plugin.
+     *
+     * @param string  $method   Hook name
+     * @param mixed   $data     Update payload for the detected type
+     * @param Telegram $Telegram Bot API instance
+     * @param string  $chatType Chat type ('private', 'group', ...)
+     */
     private function run(
         string $method,
-        object $data,
+        mixed $data,
         Telegram $Telegram,
         string $chatType
     ): void {

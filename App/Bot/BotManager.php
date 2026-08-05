@@ -51,6 +51,7 @@ final class BotManager
     {
         $bot = $this->get();
         $bot->setToken($token);
+        LogHandler::warning("BotManager: default token overridden — affects all callers");
         return $bot;
     }
 

@@ -176,12 +176,12 @@ class Language
 
             if ($entries !== false) {
                 $subFiles = [];
+                $suffix = '.' . $ext;
                 foreach ($entries as $entry) {
                     if ($entry === '.' || $entry === '..') {
                         continue;
                     }
-                    $extLen = strlen($ext) + 1;
-                    if (substr($entry, -$extLen) === '.' . $ext) {
+                    if (str_ends_with($entry, $suffix)) {
                         $subFiles[] = $entry;
                     }
                 }
@@ -201,11 +201,29 @@ class Language
             }
         }
 
-        $this->translations[$lang] = $merged;
+        // Flatten to dot-key map for O(1) lookup (skip if already flat via prefixKeys)
+        $this->translations[$lang] = $this->flattenToDotKeys($merged);
         $this->cacheTime[$lang] = time();
-        $this->saveToCache($lang, $merged);
+        $this->saveToCache($lang, $this->translations[$lang]);
 
-        LogHandler::debug("Language '{$lang}' total: " . count($merged) . " keys");
+        LogHandler::debug("Language '{$lang}' total: " . count($this->translations[$lang]) . " keys");
+    }
+
+    /**
+     * Flatten nested associative array to dot-notation key map.
+     * E.g. ['btn' => ['btna' => 'hi']] → ['btn.btna' => 'hi']
+     */
+    private function flattenToDotKeys(array $array, string $prefix = ''): array
+    {
+        $result = [];
+        foreach ($array as $key => $value) {
+            if (is_array($value) && $this->isAssociative($value)) {
+                $result = array_merge($result, $this->flattenToDotKeys($value, $prefix . $key . '.'));
+            } else {
+                $result[$prefix . $key] = $value;
+            }
+        }
+        return $result;
     }
 
     private function resolveDir(): ?string
@@ -267,10 +285,7 @@ class Language
             $this->setLanguage($lang);
         }
 
-        $value = $this->getNestedValue(
-            $this->translations[$lang] ?? [],
-            $key
-        );
+        $value = $this->translations[$lang][$key] ?? null;
 
         if ($value === null) {
             if (!isset($this->missingKeys[$lang][$key])) {
@@ -282,25 +297,6 @@ class Language
         }
 
         return $this->applyReplacements((string)$value, $replacements);
-    }
-
-    private function getNestedValue(array $array, string $key): mixed
-    {
-        if (isset($array[$key])) {
-            return $array[$key];
-        }
-
-        $keys = explode('.', $key);
-        $value = $array;
-
-        foreach ($keys as $segment) {
-            if (!is_array($value) || !array_key_exists($segment, $value)) {
-                return null;
-            }
-            $value = $value[$segment];
-        }
-
-        return $value;
     }
 
     private function applyReplacements(string $value, array $replacements): string
@@ -328,10 +324,7 @@ class Language
             $this->setLanguage($lang);
         }
 
-        return $this->getNestedValue(
-                $this->translations[$lang] ?? [],
-                $key
-            ) !== null;
+        return isset($this->translations[$lang][$key]);
     }
 
     public function getAll(?string $lang = null): array

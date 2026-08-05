@@ -1,0 +1,25 @@
+<?php
+
+declare(strict_types=1);
+
+namespace {{NAMESPACE}};
+
+use alirezax5\TelegramBase\App\Attributes\ChatType;
+use alirezax5\TelegramBase\App\Plugin\Contract\PluginInterface;
+use telegramBotApiPhp\Telegram;
+
+#[ChatType(['{{CHAT_TYPE}}'])]
+class {{CLASS}} implements PluginInterface
+{
+    public function getPriority(): int
+    {
+        return 1;
+    }
+
+    public function onMessage($update, Telegram $Telegram): void
+    {
+        $chatId = $Telegram->fromId();
+
+        $Telegram->sendMessage($chatId, __('main.welcome'));
+    }
+}
