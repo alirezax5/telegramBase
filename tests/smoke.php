@@ -21,15 +21,24 @@ use alirezax5\TelegramBase\App\Environment\EnvHandler;
  */
 $tests = [
     'bad token' => [
-        'env' => ['BOT_TOKEN' => 'not-a-token', 'BOT_MODE' => 'update_direct'],
+        'env' => [
+            'BOT_API_URL' => 'https://api.telegram.org',
+            'BOT_TOKEN' => 'not-a-token',
+            'BOT_MODE' => 'update_direct',
+        ],
         'expect' => 'InvalidArgumentException',
     ],
     'empty token' => [
-        'env' => ['BOT_TOKEN' => '', 'BOT_MODE' => 'update_direct'],
+        'env' => [
+            'BOT_API_URL' => 'https://api.telegram.org',
+            'BOT_TOKEN' => '',
+            'BOT_MODE' => 'update_direct',
+        ],
         'expect' => 'InvalidArgumentException',
     ],
     'log traversal' => [
         'env' => [
+            'BOT_API_URL' => 'https://api.telegram.org',
             'BOT_TOKEN' => '123456789:AAEhBP0fakefakefakefakefake_TfAKE',
             'BOT_MODE' => 'update_direct',
             'LOG_DIR' => '../../etc',
@@ -38,6 +47,7 @@ $tests = [
     ],
     'log absolute' => [
         'env' => [
+            'BOT_API_URL' => 'https://api.telegram.org',
             'BOT_TOKEN' => '123456789:AAEhBP0fakefakefakefakefake_TfAKE',
             'BOT_MODE' => 'update_direct',
             'LOG_DIR' => '/var/log',
@@ -46,6 +56,7 @@ $tests = [
     ],
     'bad mode' => [
         'env' => [
+            'BOT_API_URL' => 'https://api.telegram.org',
             'BOT_TOKEN' => '123456789:AAEhBP0fakefakefakefakefake_TfAKE',
             'BOT_MODE' => 'bogus_mode',
         ],
@@ -53,6 +64,7 @@ $tests = [
     ],
     'valid boot' => [
         'env' => [
+            'BOT_API_URL' => 'https://api.telegram.org',
             'BOT_TOKEN' => '123456789:AAEhBP0fakefakefakefakefake_TfAKE',
             'BOT_MODE' => 'update_direct',
             'LOG_DIR' => './logs',
