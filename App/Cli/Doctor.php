@@ -42,8 +42,12 @@ final class Doctor
 
         $doctor->printReport();
 
+        // Exit code contract: 1 only on FAIL. WARN (e.g. no .env / no token)
+        // and SKIP (e.g. no --telegram) are informational — CI runs doctor
+        // deliberately without credentials ("Doctor (no token)") and the
+        // printed RESULT already calls that outcome "OK (with warning(s))".
         foreach ($doctor->results as $r) {
-            if ($r['status'] !== 'OK') {
+            if ($r['status'] === 'FAIL') {
                 return 1;
             }
         }

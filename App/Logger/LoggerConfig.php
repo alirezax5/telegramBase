@@ -41,11 +41,33 @@ final  class LoggerConfig
      */
     private function validate(): void
     {
-        if (Path::isAbsolute($this->directory) || Path::isAbsolute($this->file)) {
+        self::assertSafeLogDir($this->directory, $this->file);
+    }
+
+    /**
+     * Fail fast on unsafe log path configuration.
+     *
+     * The same guard used by LoggerConfig::validate(), exposed statically so
+     * Paths::ensureDirectories() can reject unsafe LOG_DIR values BEFORE any
+     * directory is created. Otherwise a traversal value (e.g. "../../etc")
+     * would first be created outside the project root and only rejected
+     * later — or never rejected on hosts where the mkdir itself succeeds.
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function assertSafeLogDir(?string $directory = null, ?string $file = null): void
+    {
+        $directory ??= rtrim(
+            (string) EnvHandler::get('LOG_DIR', './logs/'),
+            '/\\'
+        );
+        $file ??= (string) EnvHandler::get('LOG_FILE', 'log.txt');
+
+        if (Path::isAbsolute($directory) || Path::isAbsolute($file)) {
             throw new \InvalidArgumentException('LOG_DIR and LOG_FILE must be relative paths.');
         }
 
-        $dir = str_replace('\\', '/', $this->directory);
+        $dir = str_replace('\\', '/', $directory);
 
         if (str_contains($dir, '..')) {
             throw new \InvalidArgumentException('LOG_DIR must not contain "..".');

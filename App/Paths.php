@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace alirezax5\TelegramBase\App;
 
 use alirezax5\TelegramBase\App\Environment\EnvHandler;
+use alirezax5\TelegramBase\App\Logger\LoggerConfig;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Filesystem\Path;
 
@@ -99,6 +100,10 @@ final class Paths
      */
     public static function ensureDirectories(): void
     {
+        // Reject unsafe LOG_DIR/LOG_FILE before any directory is created so a
+        // traversal value can never escape the project root via mkdir.
+        LoggerConfig::assertSafeLogDir();
+
         $dirs = [
             self::dataDirectory(),
             self::queueDirectory(),
