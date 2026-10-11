@@ -1,66 +1,46 @@
-# TeleBase (Telegram Base Framework)
+# TelegramBase
 
-> Mini PHP 8.1+ framework for Telegram bot development — plugin system, queue backends, i18n, caching, sessions, middleware, scheduler, webhooks, migrations, and CLI scaffolding. Built on Illuminate (Laravel) components, no reinventing the wheel.
-
-## How to use this documentation
-
-This file indexes the project documentation. For the full context file (recommended for LLMs that need the complete picture), read [llms-ctx.txt](llms-ctx.txt) — it contains the entire README inlined. The source of truth is [README.md](README.md).
+> Mini PHP 8.1+ framework for Telegram bot development — plugin system, queue backends (JSON/Redis/RabbitMQ/Memcached), validated webhooks, i18n, caching, sessions, middleware, scheduler, migrations, and CLI scaffolding. Built on Illuminate (Laravel) components. Every processing path has a measured, documented delivery guarantee (at-least-once vs at-most-once).
 
 ## Key facts
 
-- Language: PHP 8.1+, Composer, extensions `json`, `mbstring`, `curl`
-- Entry point: `php bot.php` (long-polling by default)
-- Modes: `update_direct`, `update_queue`, `webhook_direct`, `webhook_queue`, `cronjob_update`, `cronjob_queue` (via `BOT_MODE` in `.env`)
-- Plugins live in `Plugin/`, auto-discovered, PHP 8 attributes for chat-type filtering
-- Sessions, language, buttons, plugin metadata cached through `illuminate/cache`
-- Database: MySQL/MariaDB via Eloquent ORM + schema migrations
-- CLI: `php bin/tgbase` — scaffolding (make:plugin/middleware/language/button/migration) + migrate/migrate:rollback/migrate:status
+- Language: PHP 8.1+, Composer; extensions `json`, `mbstring`, `curl` (optional: `redis`, `memcached`, `amqp`, `pdo_mysql`)
+- Current version: **v2.4.0** (see CHANGELOG.md)
+- Entry points: `bot.php` (CLI modes), `webhook.php` (HTTP), `queue.php` (queue producer), `bin/tgbase` (CLI tooling), `bin/scheduler.php` (cron)
+- Modes via `BOT_MODE`: `update_direct`, `update_queue`, `webhook_direct`, `webhook_queue`, `cronjob_update`, `cronjob_queue`
+- SAPI guard: CLI-only modes on the webhook entry return HTTP 500 — never an infinite loop
+- RabbitMQ pipeline: at-least-once (ack-after-process); Redis/JSON/Memcached queues: at-most-once (destructive pop)
+- Plugins: plain classes in `Plugin/`, auto-discovered, `#[ChatType]` attribute filtering, priority-ordered handlers (`onMessage`, `onCallback_query`, `onCommand`, `before`, `after`)
+- Retry queue for transient API failures (429/5xx/timeout) honoring Telegram's `retry_after`
+- Tests: dependency-free runner (`php tests/run.php`, `--filter=`), opt-in live Telegram tests, GitHub Actions CI (PHP 8.1–8.4)
 
 ## Documentation
 
-- [README.md](README.md): Full framework documentation — quick start, bot modes, folder structure, plugin authoring, every feature, config reference, Illuminate component mapping
-- [llms-ctx.txt](llms-ctx.txt): Single-file flattened context (full README content) for LLM ingestion
+- Documentation is multilingual: `docs/en/` (canonical), plus complete sets in `docs/fa/`, `docs/zh/`, `docs/ru/`, `docs/fr/`, `docs/pt/`, `docs/ar/` — language hub at [docs/README.md](docs/README.md); per-language READMEs (`README.fa.md`, `README.zh.md`, `README.ru.md`, `README.fr.md`, `README.pt.md`, `README.ar.md`).
 
-## Architecture (file map)
-
-- [App/](App/): Framework core — see README folder-structure section
-- [App/Attributes/](App/Attributes/): PHP 8 attributes (e.g. `ChatType`)
-- [App/Bootstrap/](App/Bootstrap/): Boot sequence — config, language, buttons, plugins
-- [App/Bot/](App/Bot/): BotManager singleton (Telegram API instance)
-- [App/Button/](App/Button/): ButtonManager + fluent Keyboard builder
-- [App/Cache/](App/Cache/): CacheManager — array/file/redis/memcached/database drivers
-- [App/Cli/](App/Cli/): CLI Console + Maker + stubs (scaffolding commands)
-- [App/Config/](App/Config/): Typed config objects (App, Session, Scheduler, Retry, ...)
-- [App/Connection/](App/Connection/): Redis / Memcached / RabbitMQ connection configs
-- [App/Cron/](App/Cron/): CronManager + CronWorker (cron-friendly tick processing)
-- [App/Database/](App/Database/): DatabaseManager, MigrationRunner, migration base class
-- [App/Environment/](App/Environment/): EnvHandler (.env loader) + EnvironmentValidator
-- [App/Enum/](App/Enum/): CoreMode enum
-- [App/Language/](App/Language/): i18n loader + `__()` helper
-- [App/Logger/](App/Logger/): LogHandler + LoggerConfig
-- [App/Middleware/](App/Middleware/): MiddlewareInterface + Illuminate Pipeline + RateLimit/AuditLog/AdminGuard
-- [App/Plugin/](App/Plugin/): PluginHandler (discovery + dispatch), PluginInterface
-- [App/Queue/](App/Queue/): QueueManager (json/redis/rabbitmq/memcached) + RetryQueue + RetryableException
-- [App/Scheduler/](App/Scheduler/): Scheduler + ScheduledTask (cron expressions) + TaskLock
-- [App/Session/](App/Session/): Session + SessionManager (cache-backed, TTL)
-- [App/Storage/](App/Storage/): OffsetStorage, cache/queue stores
-- [App/Update/](App/Update/): Fetcher (long-polling), Processor (update dispatch), PollingLoop, WebhookDispatcher
-- [Database/Migrations/](Database/Migrations/): Eloquent migration files (run via CLI)
-- [Plugin/](Plugin/): User bot plugins (the code you write)
-- [Button/](Button/): Keyboard button definition files (i18n labels)
-- [Language/](Language/): Translation arrays (default `fa`)
-- [bin/](bin/): Entry scripts — `tgbase` CLI, `scheduler.php` (cron), `tasks.php` (task registry)
-- [tests/](tests/): smoke + pipeline tests
-
-## Key workflows
-
-1. **Scaffold a plugin**: `php bin/tgbase make:plugin users/register --type=private`
-2. **Scaffold a middleware**: `php bin/tgbase make:middleware RateLimit`
-3. **Create + run a migration**: `php bin/tgbase make:migration create_users_table` → edit → `php bin/tgbase migrate`
-4. **Roll back a batch**: `php bin/tgbase migrate:rollback`
-5. **Schedule a task**: register in `bin/tasks.php`, cron `* * * * * php bin/scheduler.php`
-6. **Switch to webhook**: set `BOT_MODE=webhook_direct`, point `BOT_WEBHOOK_URL` at `webhook.php`
+- [README.md](README.md): project intro, quick start, docs index
+- [docs/overview.md](docs/en/overview.md): what the framework is, what it does, what it deliberately doesn't do
+- [docs/architecture.md](docs/en/architecture.md): boot sequence, update flow diagram, component map of `App/`
+- [docs/getting-started.md](docs/en/getting-started.md): install → first plugin → deploy step by step
+- [docs/bot-modes.md](docs/en/bot-modes.md): all six `BOT_MODE`s, entry points, the SAPI guard, delivery semantics per path
+- [docs/plugins.md](docs/en/plugins.md): plugin authoring — handlers, priority, `#[ChatType]`, discovery rules
+- [docs/queue-pipeline.md](docs/en/queue-pipeline.md): queue backends, the RabbitMQ ack contract, retry queue, bounded queues
+- [docs/webhook.md](docs/en/webhook.md): webhook setup, the 5 validation layers, Cloudflare/proxy notes, response semantics
+- [docs/reliability.md](docs/en/reliability.md): crash-test results, delivery guarantees, idempotency recipes
+- [docs/configuration.md](docs/en/configuration.md): full `.env` reference with defaults
+- [docs/features.md](docs/en/features.md): sessions, keyboards, middleware, cache, i18n, scheduler, database, CLI
+- [docs/caching.md](docs/en/caching.md): CacheManager — drivers, config, TTL semantics, flush reach per driver, cross-process persistence matrix (live-verified)
+- [docs/sessions.md](docs/en/sessions.md): SessionManager API, multi-step flows, which driver you need, security notes
+- [docs/i18n.md](docs/en/i18n.md): language file layout, `__()` helper, LANG_DRIVER pitfall, per-user language, cache behavior
+- [docs/buttons.md](docs/en/buttons.md): Keyboard builder API, ButtonManager/btn() file menus, callback handling, caching
+- [docs/multi-bot.md](docs/en/multi-bot.md): BotManager, BOT_EXTRA_BOTS, token stack, live-verified cross-bot scenarios; token-management strategy matrix (static .env / dynamic add() / Managed Bots) and Bot API 9.6 Managed Bots support (onManagedBot, registerManagedBot, requestManagedBot)
+- [docs/testing.md](docs/en/testing.md): offline suite, live tests, CI, known suite drift
+- [docs/troubleshooting.md](docs/en/troubleshooting.md): symptoms → causes → fixes
+- [CHANGELOG.md](CHANGELOG.md): version history (starts at v2.4.0)
 
 ## Optional
 
-- Full config keys with defaults: see `.env.example` (bot, plugins, language, buttons, queue, cache, session, scheduler, retry, database, redis, rabbitmq, memcached, logging sections)
+- [.env.example](.env.example): every configuration key with defaults and comments
+- [examples/HelloBot.php](examples/HelloBot.php): complete example plugin (commands, inline keyboard, sessions, retry helper, callbacks)
+- [integration/TestBot/](integration/TestBot/README.md): real-bot integration harness (opt-in, isolated `Plugin/` dir)
+- [llms-ctx.txt](llms-ctx.txt): single-file flattened context (README + all docs) for LLM ingestion without file access

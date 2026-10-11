@@ -1,0 +1,64 @@
+# ============================================
+# Dependencies
+# ============================================
+vendor/
+node_modules/
+
+# ============================================
+# Secrets / environment
+# ============================================
+.env
+.env.local
+.env.*.local
+*.secret
+secrets.json
+
+# ============================================
+# Runtime data (do not commit)
+# ============================================
+AppData/lastupdate.txt
+AppData/queue/
+AppData/retry/
+AppData/cron-slots/*.lock
+AppData/sessions/
+AppData/cache/
+
+# ============================================
+# Logs
+# ============================================
+logs/
+*.log
+php_errors.log
+
+# ============================================
+# Database (local dev)
+# ============================================
+*.sqlite
+*.sqlite3
+database.sqlite
+Database/Connections.local.php
+
+# ============================================
+# IDE / OS
+# ============================================
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ============================================
+# Test artifacts
+# ============================================
+.phpunit.result.cache
+.phpunit.cache/
+coverage/
+coverage.xml
+tests/_tmp_offset_*/
+tmp/
+
+proposal
+integration
+.zip

@@ -27,12 +27,14 @@ final class AdminGuardMiddleware implements MiddlewareInterface
         }
 
         $admins = array_map('trim', explode(',', $allowed));
-        $chatId = $update->message->chat->id
-            ?? $update->callback_query?->from->id
+        $chatId = $update->message?->chat?->id
+            ?? $update->edited_message?->chat?->id
+            ?? $update->channel_post?->chat?->id
+            ?? $update->callback_query?->from?->id
             ?? null;
 
-        if (!in_array((string)$chatId, $admins, true)) {
-            LogHandler::warning("⛔ Access denied for chat {$chatId}");
+        if ($chatId === null || !in_array((string)$chatId, $admins, true)) {
+            LogHandler::warning("⛔ Access denied for chat " . ($chatId ?? 'unknown'));
             return null;
         }
 

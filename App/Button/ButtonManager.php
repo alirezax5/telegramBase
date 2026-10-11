@@ -14,6 +14,7 @@ final class ButtonManager
     private static bool $loaded = false;
     private static bool $init = false;
     private static int $ttl = 300;
+    private static bool $cacheEnabled = true;
     private static string $buttonDir;
     private static string $buttonFile;
 
@@ -30,6 +31,9 @@ final class ButtonManager
         self::$buttonFile = $config->file;
         self::$buttonDir = $config->dir;
         self::$ttl = $config->cacheTTL;
+        // P-CACHE-F002: BUTTONS_CACHE_ENABLED was read into config but never
+        // consulted — the flag now actually disables the button cache.
+        self::$cacheEnabled = $config->cacheEnabled;
 
         self::$init = true;
     }
@@ -53,7 +57,7 @@ final class ButtonManager
 
     private static function fromCache(): bool
     {
-        if (!CacheManager::isInitialized() || self::$ttl <= 0) {
+        if (!self::$cacheEnabled || !CacheManager::isInitialized() || self::$ttl <= 0) {
             return false;
         }
 
@@ -123,7 +127,7 @@ final class ButtonManager
 
         self::$buttons = $merged;
 
-        if (CacheManager::isInitialized() && self::$ttl > 0) {
+        if (self::$cacheEnabled && CacheManager::isInitialized() && self::$ttl > 0) {
             CacheManager::put(self::CACHE_KEY, $merged, self::$ttl);
         }
 
@@ -197,7 +201,7 @@ final class ButtonManager
         self::$buttons = [];
         self::$loaded = false;
 
-        if (CacheManager::isInitialized()) {
+        if (self::$cacheEnabled && CacheManager::isInitialized()) {
             CacheManager::forget(self::CACHE_KEY);
         }
     }

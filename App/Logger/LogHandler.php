@@ -42,7 +42,7 @@ class LogHandler
             $level = EnvHandler::get('LOG_LEVEL', 'debug');
 
             $handler = new StreamHandler(
-                $config->fullPath(),
+                $config->absolutePath(),
                 match (strtolower($level)) {
                     'error' => Logger::ERROR,
                     'warning' => Logger::WARNING,
@@ -74,6 +74,13 @@ class LogHandler
 
     public static function log(string $level, string $message, array $context = []): void
     {
+        // If the framework was never bootstrapped (e.g. unit tests that
+        // exercise a single class in isolation), silently no-op rather
+        // than crash with a TypeError on Config::logger().
+        if (!\alirezax5\TelegramBase\App\Config\Config::has()) {
+            return;
+        }
+
         self::init();
 
         if (!self::$enabled || self::$logger === null) {

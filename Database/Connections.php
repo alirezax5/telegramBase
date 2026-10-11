@@ -12,7 +12,10 @@ return [
     'default' => 'main',
     'connections' => [
         'main' => [
-            'driver'    => 'mysql',
+            // P-REL-B03: honor DB_DRIVER (documented in configuration.md as
+            // "any PDO driver, sqlite for local dev") instead of hardcoding
+            // mysql. Default unchanged — existing deployments are unaffected.
+            'driver'    => EnvHandler::get('DB_DRIVER', 'mysql'),
             'host'      => EnvHandler::get('DB_HOST', '127.0.0.1'),
             'port'      => EnvHandler::get('DB_PORT', 3306),
             'database'  => EnvHandler::get('DB_DATABASE'),

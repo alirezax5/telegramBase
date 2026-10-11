@@ -80,13 +80,59 @@ final class Keyboard
             $btn[$type] = $value;
         }
 
-        $rowIndex = max(0, array_key_last($this->rows) ?? 0);
+        // Append to the current row. If no row exists yet, start one
+        // implicitly so callers can write Keyboard::inline()->button(...).
+        $lastKey = array_key_last($this->rows);
 
-        if (!isset($this->rows[$rowIndex])) {
-            $this->rows[$rowIndex] = [];
+        if ($lastKey === null) {
+            $this->rows[] = [];
+            $lastKey = array_key_last($this->rows);
         }
 
-        $this->rows[$rowIndex][] = $btn;
+        $this->rows[$lastKey][] = $btn;
+
+        return $this;
+    }
+
+    /**
+     * Reply keyboard only: ask the user to create and share a MANAGED bot
+     * (Bot API 9.6, KeyboardButtonRequestManagedBot).
+     *
+     * Requires the manager bot to have "management of other bots" enabled in
+     * the @BotFather Mini App, and works in private chats only. When the user
+     * completes the flow the framework dispatches a `managed_bot` update
+     * (plugin hook `onManagedBot`) plus a message carrying `managed_bot_created`.
+     *
+     * @param string $text              Visible button label.
+     * @param int    $requestId         Signed 32-bit id, unique within the message.
+     * @param string $suggestedName     Optional suggested bot name.
+     * @param string $suggestedUsername Optional suggested bot username (no @).
+     */
+    public function requestManagedBot(
+        string $text,
+        int $requestId,
+        string $suggestedName = '',
+        string $suggestedUsername = ''
+    ): self {
+        $req = ['request_id' => $requestId];
+        if ($suggestedName !== '') {
+            $req['suggested_name'] = $suggestedName;
+        }
+        if ($suggestedUsername !== '') {
+            $req['suggested_username'] = $suggestedUsername;
+        }
+
+        $lastKey = array_key_last($this->rows);
+
+        if ($lastKey === null) {
+            $this->rows[] = [];
+            $lastKey = array_key_last($this->rows);
+        }
+
+        $this->rows[$lastKey][] = [
+            'text' => $text,
+            'request_managed_bot' => $req,
+        ];
 
         return $this;
     }

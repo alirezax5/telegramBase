@@ -125,6 +125,11 @@ class CacheRedisStore implements Store
     /**
      * Flush all keys with the current prefix (SCAN-based, production-safe).
      * Guarded: if prefix empty, refuses to avoid nuking entire Redis DB.
+     *
+     * P-CACHE-F001: the loop must continue while the SCAN cursor is non-zero.
+     * An empty MATCH page on a large/shared keyspace is common and NON-terminal;
+     * the previous `while ($keys = scan(...))` terminated on the first empty
+     * page, leaving matched keys behind while still returning true.
      */
     public function flush(): bool
     {
@@ -136,11 +141,13 @@ class CacheRedisStore implements Store
         $pattern = $this->prefix . '*';
         $iterator = null;
 
-        while ($keys = $this->redis->scan($iterator, $pattern, 1000)) {
-            if (!empty($keys)) {
+        do {
+            $keys = $this->redis->scan($iterator, $pattern, 1000);
+
+            if (is_array($keys) && $keys !== []) {
                 $this->redis->unlink($keys);
             }
-        }
+        } while ($iterator > 0);
 
         return true;
     }

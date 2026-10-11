@@ -25,9 +25,14 @@ final class RateLimitMiddleware implements MiddlewareInterface
      */
     public function handle(object $update, Telegram $Telegram, callable $next): mixed
     {
-        $chatId = $update->message->chat->id
-            ?? $update->callback_query?->from->id
-            ?? $update->chat_member?->from->id
+        // Nullsafe traversal covers every common update type. If no chat
+        // id can be extracted (e.g. an update with no message/callback),
+        // the limiter simply lets the update through.
+        $chatId = $update->message?->chat?->id
+            ?? $update->edited_message?->chat?->id
+            ?? $update->channel_post?->chat?->id
+            ?? $update->callback_query?->from?->id
+            ?? $update->chat_member?->from?->id
             ?? null;
 
         if ($chatId === null) {

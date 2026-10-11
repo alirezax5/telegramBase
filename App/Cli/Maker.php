@@ -34,6 +34,10 @@ final class Maker
 
     /**
      * Create a plugin from a path like "users/register".
+     *
+     * Each path segment is normalized to StudlyCaps (PSR-4 convention):
+     *   "users/register"  → namespace "…\Plugin\Users", class "Register"
+     *   "audit_test/samp" → namespace "…\Plugin\AuditTest", class "Samp"
      */
     public static function makePlugin(string $basePath, ...$args): void
     {
@@ -41,6 +45,9 @@ final class Maker
         $path = trim($path, '/');
 
         $parts = array_map('ucfirst', explode('/', $path));
+        // Normalize each segment to StudlyCaps (e.g. "audit_test" → "AuditTest")
+        $parts = array_map(static fn ($p) => str_replace(' ', '', ucwords(str_replace(['_', '-'], ' ', $p))), $parts);
+
         $className = array_pop($parts);
         $namespace = 'alirezax5\\TelegramBase\\Plugin'
             . ($parts ? '\\' . implode('\\', $parts) : '');

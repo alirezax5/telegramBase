@@ -1,0 +1,46 @@
+name: live-tests
+
+# Manual live Telegram test workflow.
+# Default CI (tests.yml) does NOT use any secrets.
+# This workflow must be triggered manually and reads the bot token
+# from the TGBASE_LIVE_BOT_TOKEN repository secret — never from the
+# workflow file itself.
+
+on:
+  workflow_dispatch:
+    inputs:
+      chat_id:
+        description: 'Telegram test chat ID'
+        required: true
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  live-telegram:
+    name: Live Telegram API tests
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.chat_id != '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: curl, json, mbstring, bcmath, iconv
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run live tests
+        env:
+          RUN_TELEGRAM_LIVE_TESTS: '1'
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TGBASE_LIVE_BOT_TOKEN }}
+          TELEGRAM_TEST_CHAT_ID: ${{ github.event.inputs.chat_id }}
+        run: php tests/run.php

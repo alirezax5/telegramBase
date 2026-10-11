@@ -12,6 +12,7 @@ declare(strict_types=1);
  */
 
 use alirezax5\TelegramBase\App\Bootstrap\Bootstrap;
+use alirezax5\TelegramBase\App\Environment\EnvHandler;
 use alirezax5\TelegramBase\App\Scheduler\Scheduler;
 
 require __DIR__ . '/../vendor/autoload.php';
@@ -25,7 +26,12 @@ try {
 
 $scheduler = new Scheduler();
 
-$scheduleFile = getenv('SCHEDULE_FILE') ?: __DIR__ . '/tasks.php';
+// P-REL-B02: EnvHandler ($_ENV first, getenv second) so SCHEDULE_FILE set
+// in .env is honored too — raw getenv() never sees Dotenv values.
+$scheduleFile = EnvHandler::get('SCHEDULE_FILE', __DIR__ . '/tasks.php');
+if (!is_string($scheduleFile) || $scheduleFile === '') {
+    $scheduleFile = __DIR__ . '/tasks.php';
+}
 
 if (!is_file($scheduleFile)) {
     fwrite(STDERR, 'No schedule file at: ' . $scheduleFile . PHP_EOL);

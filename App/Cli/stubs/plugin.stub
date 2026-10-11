@@ -13,13 +13,27 @@ class {{CLASS}} implements PluginInterface
 {
     public function getPriority(): int
     {
+        // Lower priority runs first. Default 1.
         return 1;
     }
 
     public function onMessage($update, Telegram $Telegram): void
     {
+        // $update here is the inner message object — use $update->text, $update->chat->id, ...
         $chatId = $Telegram->fromId();
 
-        $Telegram->sendMessage($chatId, __('main.welcome'));
+        // Always test that the API call succeeded; the SDK returns a
+        // stdClass with ->ok === false on error rather than throwing.
+        $response = $Telegram->sendMessage(
+            $chatId,
+            'Hello from {{CLASS}}! Send /help to see what I can do.'
+        );
+
+        if (empty($response->ok)) {
+            // Log the failure but do not crash the worker.
+            \alirezax5\TelegramBase\App\Logger\LogHandler::warning(
+                'sendMessage failed in {{CLASS}}: ' . ($response->description ?? 'unknown')
+            );
+        }
     }
 }

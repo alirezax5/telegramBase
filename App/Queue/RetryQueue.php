@@ -125,7 +125,17 @@ final class RetryQueue
                     continue;
                 }
 
-                $delay = $this->baseDelay * (2 ** $attempts);
+                // Honor Telegram's retry_after hint when available. The SDK
+                // may swallow 429s internally, but if a RetryableException
+                // reaches us with a retryAfter value, prefer it over our
+                // own exponential backoff — Telegram knows its own rate
+                // limits better than we do.
+                if ($e instanceof RetryableException && $e->retryAfter !== null) {
+                    $delay = max(1, (int)$e->retryAfter);
+                } else {
+                    $delay = $this->baseDelay * (2 ** $attempts);
+                }
+
                 $item['next_retry_at'] = time() + $delay;
                 $item['last_error'] = $e->getMessage();
 

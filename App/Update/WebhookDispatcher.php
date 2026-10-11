@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace alirezax5\TelegramBase\App\Update;
 
+use alirezax5\TelegramBase\App\Bootstrap\QueueBootstrap;
 use alirezax5\TelegramBase\App\Environment\EnvHandler;
 use alirezax5\TelegramBase\App\Logger\LogHandler;
+use alirezax5\TelegramBase\App\Queue\QueueManager;
 
 /**
  * Validates and dispatches incoming Telegram webhook requests.
@@ -13,12 +15,23 @@ use alirezax5\TelegramBase\App\Logger\LogHandler;
  * Enforces Telegram's known IP ranges, an optional secret token, a size
  * limit and valid JSON before handing the update to the processor (sync
  * direct) or the queue manager (async).
+ *
+ * The dispatcher is split into two layers:
+ *   - dispatch()    : top-level entry point, calls dispatchIntoResponse()
+ *                     and exits (the original behaviour, used by webhook.php)
+ *   - dispatchIntoResponse() : performs all the validation/routing and
+ *                     returns a WebhookResponse DTO. Does NOT exit.
+ *
+ * The split lets unit tests exercise every code path (IP reject, secret
+ * mismatch, oversize, bad JSON, queue vs direct) without `exit()` getting
+ * in the way.
  */
 final class WebhookDispatcher
 {
     /**
      * Telegram Bot API server subnets.
      *
+     * Source: official Telegram docs (https://core.telegram.org/bots/webhooks)
      * @var string[]
      */
     private const TELEGRAM_RANGES = [
@@ -30,7 +43,7 @@ final class WebhookDispatcher
         '95.161.64.0/20',
     ];
 
-    private const MAX_SIZE = 1_048_576; // 1 MB
+    private const MAX_SIZE = 1_048_576; // 1 MB — Telegram never sends larger payloads
 
     private Processor $processor;
     private bool $checkIp;
@@ -38,47 +51,68 @@ final class WebhookDispatcher
     public function __construct(Processor $processor)
     {
         $this->processor = $processor;
-        $this->checkIp = (bool)EnvHandler::get('WEBHOOK_CHECK_IP', true);
+        $this->checkIp = EnvHandler::bool('WEBHOOK_CHECK_IP', true);
     }
 
     /**
-     * Validate request and dispatch the update.
+     * Top-level entry: validate the incoming request, dispatch, send HTTP
+     * status, and terminate. This is what webhook.php calls.
+     *
+     * For tests, prefer dispatchIntoResponse() which returns a DTO instead
+     * of exiting.
      */
     public function dispatch(): void
     {
-        // --- Size limit ---
-        $body = file_get_contents('php://input');
+        $response = $this->dispatchIntoResponse(
+            body: file_get_contents('php://input') ?: '',
+            remoteIp: $_SERVER['REMOTE_ADDR'] ?? '',
+            secretHeader: $_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] ?? '',
+            botMode: EnvHandler::get('BOT_MODE', 'webhook_direct')
+        );
 
-        if ($body === false || $body === '') {
-            http_response_code(400);
-            exit('empty');
+        http_response_code($response->status);
+        echo $response->body;
+        exit($response->exitCode);
+    }
+
+    /**
+     * Validate and route an incoming webhook payload without side effects
+     * on HTTP status or process exit. Used by dispatch() and by tests.
+     *
+     * @param string $body         Raw request body
+     * @param string $remoteIp     Client IP (REMOTE_ADDR)
+     * @param string $secretHeader X-Telegram-Bot-Api-Secret-Token header
+     * @param string $botMode      Current BOT_MODE env value
+     */
+    public function dispatchIntoResponse(
+        string $body,
+        string $remoteIp,
+        string $secretHeader,
+        string $botMode = 'webhook_direct',
+    ): WebhookResponse {
+        // --- Size limit ---
+        if ($body === '') {
+            return new WebhookResponse(400, 'empty', 0);
         }
 
         if (strlen($body) > self::MAX_SIZE) {
             LogHandler::warning('⛔ Webhook payload too large');
-            http_response_code(413);
-            exit('payload too large');
+            return new WebhookResponse(413, 'payload too large', 0);
         }
 
         // --- IP whitelist ---
-        $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-
-        if ($this->checkIp && !$this->isInTelegramNetwork($ip)) {
-            LogHandler::warning("⛔ Webhook from unknown IP: {$ip}");
-            http_response_code(403);
-            exit('forbidden');
+        if ($this->checkIp && !$this->isInTelegramNetwork($remoteIp)) {
+            LogHandler::warning("⛔ Webhook from unknown IP: {$remoteIp}");
+            return new WebhookResponse(403, 'forbidden', 0);
         }
 
         // --- Secret token ---
         $secret = EnvHandler::get('BOT_WEBHOOK_SECRET', '');
 
         if ($secret !== '') {
-            $given = $_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] ?? '';
-
-            if (!hash_equals($secret, $given)) {
+            if (!hash_equals($secret, $secretHeader)) {
                 LogHandler::warning('⛔ Webhook secret token mismatch');
-                http_response_code(403);
-                exit('forbidden');
+                return new WebhookResponse(403, 'forbidden', 0);
             }
         }
 
@@ -86,43 +120,57 @@ final class WebhookDispatcher
         $update = json_decode($body, false);
 
         if (!is_object($update) || !isset($update->update_id)) {
-            http_response_code(400);
-            exit('bad payload');
+            return new WebhookResponse(400, 'bad payload', 0);
         }
 
         // --- Route ---
-        if (str_ends_with(EnvHandler::get('BOT_MODE', 'webhook_direct'), '_queue')) {
-            $this->enqueueUpdate($update);
+        if (str_ends_with($botMode, '_queue')) {
+            try {
+                $this->enqueueUpdate($update);
+            } catch (\Throwable $e) {
+                LogHandler::error('⛔ Failed to enqueue webhook update: ' . $e->getMessage());
+                return new WebhookResponse(500, 'queue error', 1);
+            }
         } else {
             $this->processor->handle($update);
         }
 
-        // --- Acknowledge immediately ---
-        http_response_code(200);
-        exit('ok');
+        return new WebhookResponse(200, 'ok', 0);
     }
 
     /**
-     * Queue an update for async processing.
+     * Queue an update for async processing via the shared QueueBootstrap
+     * singleton (was previously constructing a fresh QueueManager —
+     * that re-read config and bypassed the shared connection state).
      */
     private function enqueueUpdate(object $update): void
     {
-        try {
-            $manager = new \alirezax5\TelegramBase\App\Queue\QueueManager();
-            $manager->push(json_decode(json_encode($update), true));
-        } catch (\Throwable $e) {
-            LogHandler::error('⛔ Failed to enqueue webhook update: ' . $e->getMessage());
-            http_response_code(500);
-            exit('queue error');
+        $queue = QueueBootstrap::getQueue();
+
+        if ($queue instanceof QueueManager) {
+            $queue->push(json_decode(json_encode($update), true));
+            return;
         }
+
+        // Fallback: build a fresh manager if bootstrap didn't (e.g.
+        // BOT_MODE was changed at runtime). This preserves the original
+        // behaviour without making it the common path.
+        (new QueueManager(\alirezax5\TelegramBase\App\Config\Config::queue()))
+            ->push(json_decode(json_encode($update), true));
     }
 
     /**
      * CIDR check — is $ip within any Telegram subnet?
      */
-    private function isInTelegramNetwork(string $ip): bool
+    public function isInTelegramNetwork(string $ip): bool
     {
         if ($ip === '') {
+            return false;
+        }
+
+        // Reject obviously malformed IPs early — ip2long returns false
+        // for them but we want a clear boundary.
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
             return false;
         }
 
@@ -147,7 +195,10 @@ final class WebhookDispatcher
             return false;
         }
 
-        $rangeStart = ($subnetLong >> (32 - $mask)) << (32 - $mask);
+        // Force unsigned semantics — ip2long can return negatives on 32-bit PHP.
+        $ipLong = $ipLong & 0xFFFFFFFF;
+        $subnetLong = $subnetLong & 0xFFFFFFFF;
+
         $maskFull = $mask === 0 ? 0 : (0xFFFFFFFF << (32 - $mask)) & 0xFFFFFFFF;
 
         return ($ipLong & $maskFull) === ($subnetLong & $maskFull);

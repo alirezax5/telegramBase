@@ -84,6 +84,16 @@ class QueueManager
      */
     public function push(mixed $update): bool
     {
+        // P3.3.1-F003 fix: polling-mode fetchers deliver Telegram update
+        // OBJECTS (telegramBotApiPhp\Types\returnedMessage) while queue
+        // drivers (JsonQueue / RedisQueue) contract plain arrays. Normalize
+        // objects to arrays once at this single choke point so every driver
+        // receives a uniform payload. Arrays (webhook_queue getInputData
+        // path) pass through untouched.
+        if (is_object($update)) {
+            $update = json_decode(json_encode($update), true);
+        }
+
         if ($this->maxSize > 0 && $this->count() >= $this->maxSize) {
             LogHandler::warning(
                 "⛔ Queue full ({$this->maxSize}), update rejected"
@@ -109,6 +119,28 @@ class QueueManager
         }
 
         return $this->executeWithRetry(fn() => $this->driver->pop($timeout), 'pop');
+    }
+
+    /**
+     * P3.3.1-F006 fix: acknowledge the last popped message AFTER it has
+     * been processed.
+     *
+     * Only drivers with broker-side acknowledgement implement this
+     * (RabbitQueue). Destructive-pop drivers (redis/json/memcached)
+     * remove the message at pop time, so ack() is a no-op for them.
+     *
+     * Workers MUST call this after each successfully handled message;
+     * skipping it makes the broker redeliver the message (at-least-once).
+     */
+    public function ack(): void
+    {
+        try {
+            if (method_exists($this->driver, 'ack')) {
+                $this->driver->ack();
+            }
+        } catch (\Throwable $e) {
+            LogHandler::warning('Queue ack failed: ' . $e->getMessage());
+        }
     }
 
     /**

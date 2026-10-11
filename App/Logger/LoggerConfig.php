@@ -60,6 +60,21 @@ final  class LoggerConfig
         return $this->directory . DIRECTORY_SEPARATOR . $this->file;
     }
 
+    /**
+     * Absolute path of the log file, resolved against the project base.
+     *
+     * Use this when handing the path to Monolog/StreamHandler — using the
+     * relative fullPath() would write logs into the current working
+     * directory, which is wrong for `bin/tgbase` invocations from
+     * elsewhere in the filesystem.
+     */
+    public function absolutePath(): string
+    {
+        return \alirezax5\TelegramBase\App\Paths::logDirectory()
+            . DIRECTORY_SEPARATOR
+            . $this->file;
+    }
+
     private static function toBool(mixed $value): bool
     {
         return filter_var($value, FILTER_VALIDATE_BOOLEAN);

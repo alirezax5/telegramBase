@@ -4,11 +4,11 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "34bcfccb263f24c1c86eaf29e35bcdc4",
+    "content-hash": "98ef94b646d27016705eaccc901f2e56",
     "packages": [
         {
             "name": "alirezax5/telegram-bot-php",
-            "version": "3.0.0",
+            "version": "3.3.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/alirezax5/telegramBotPhp.git",
@@ -16,9 +16,8 @@
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/alirezax5/telegramBotPhp/zipball/5e5ae29204faca272898a84254bc3095299baba1",
-                "reference": "5e5ae29204faca272898a84254bc3095299baba1",
-                "shasum": ""
+                "url": "https://api.github.com/repos/alirezax5/telegramBotPhp/zipball/3.3.0",
+                "reference": "3.3.0"
             },
             "require": {
                 "ext-curl": "*",
@@ -58,7 +57,8 @@
                 "issues": "https://github.com/alirezax5/telegramBotPhp/issues",
                 "source": "https://github.com/alirezax5/telegramBotPhp/tree/3.0.0"
             },
-            "time": "2026-06-08T19:22:17+00:00"
+            "time": "2026-06-08T19:22:17+00:00",
+            "version_normalized": "3.3.0.0"
         },
         {
             "name": "brick/math",
@@ -2556,5 +2556,5 @@
     "prefer-lowest": false,
     "platform": {},
     "platform-dev": {},
-    "plugin-api-version": "2.6.0"
+    "plugin-api-version": "2.9.0"
 }

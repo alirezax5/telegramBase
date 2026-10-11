@@ -16,12 +16,21 @@ use alirezax5\TelegramBase\App\Config\Config;
  */
 final class Session
 {
+    private int $chatId;
+    private string $sessionId;
+    private array $data;
+    private int $lastActivity;
+
     public function __construct(
-        private readonly int $chatId,
-        private readonly string $sessionId,
-        private array $data,
-        private int $lastActivity,
+        int $chatId,
+        string $sessionId,
+        array $data,
+        int $lastActivity,
     ) {
+        $this->chatId = $chatId;
+        $this->sessionId = $sessionId;
+        $this->data = $data;
+        $this->lastActivity = $lastActivity;
     }
 
     /**

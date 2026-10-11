@@ -8,6 +8,7 @@ use alirezax5\TelegramBase\App\Bot\BotConfig;
 use alirezax5\TelegramBase\App\Button\ButtonConfig;
 use alirezax5\TelegramBase\App\Cache\CacheConfig;
 use alirezax5\TelegramBase\App\Database\DatabaseConfig;
+use alirezax5\TelegramBase\App\Environment\EnvHandler;
 use alirezax5\TelegramBase\App\Language\LanguageConfig;
 use alirezax5\TelegramBase\App\Logger\LoggerConfig;
 use alirezax5\TelegramBase\App\Plugin\PluginConfig;
@@ -42,6 +43,19 @@ final class AppConfigFactory
 
     public static function createDatabaseConfig(): DatabaseConfig
     {
+        // Explicit env switch — DATABASE_ENABLE=false overrides the
+        // presence of Database/Connections.php so users without a DB
+        // can still bootstrap the framework.
+        $enabled = EnvHandler::bool('DATABASE_ENABLE', false);
+
+        if (!$enabled) {
+            return new DatabaseConfig(
+                enable: false,
+                default: 'main',
+                connections: [],
+            );
+        }
+
         $file = Paths::databaseConnections();
 
         if (!file_exists($file)) {

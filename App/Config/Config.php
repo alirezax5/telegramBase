@@ -33,69 +33,88 @@ final class Config
         self::$appConfig = $config;
     }
 
+    /**
+     * P-REL-B06: fail with a readable message when accessors are called
+     * before Config::init() (i.e. Bootstrap::boot() failed or was never
+     * called). Previously this produced "Attempt to read property on
+     * null" warnings followed by a bare TypeError, which hid the real
+     * cause from the developer.
+     */
+    private static function cfg(): AppConfig
+    {
+        if (self::$appConfig === null) {
+            throw new \RuntimeException(
+                'Config is not initialized — Bootstrap::boot() did not complete.'
+                . ' Check the boot error above (missing/invalid .env or BOT_TOKEN).'
+            );
+        }
+
+        return self::$appConfig;
+    }
+
     public static function bot(): BotConfig
     {
-        return self::$appConfig->bot;
+        return self::cfg()->bot;
     }
 
     public static function cache(): CacheConfig
     {
-        return self::$appConfig->cache;
+        return self::cfg()->cache;
     }
 
     public static function queue(): QueueConfig
     {
-        return self::$appConfig->queue;
+        return self::cfg()->queue;
     }
 
     public static function retry(): RetryConfig
     {
-        return self::$appConfig->retry;
+        return self::cfg()->retry;
     }
 
     public static function connection(): ConnectionConfig
     {
-        return self::$appConfig->connection;
+        return self::cfg()->connection;
     }
 
     public static function language(): LanguageConfig
     {
-        return self::$appConfig->language;
+        return self::cfg()->language;
     }
 
     public static function logger(): LoggerConfig
     {
-        return self::$appConfig->logger;
+        return self::cfg()->logger;
     }
 
     public static function buttons(): ButtonConfig
     {
-        return self::$appConfig->buttons;
+        return self::cfg()->buttons;
     }
 
     public static function plugins(): PluginConfig
     {
-        return self::$appConfig->plugins;
+        return self::cfg()->plugins;
     }
 
     public static function cron(): CronConfig
     {
-        return self::$appConfig->cron;
+        return self::cfg()->cron;
     }
 
     public static function scheduler(): SchedulerConfig
     {
-        return self::$appConfig->scheduler;
+        return self::cfg()->scheduler;
     }
 
     public static function session(): SessionConfig
     {
-        return self::$appConfig->session;
+        return self::cfg()->session;
     }
 
     public static function database(): DatabaseConfig
     {
-        return self::$appConfig->database;
+        return self::cfg()->database;
     }
 
     public static function has(): bool

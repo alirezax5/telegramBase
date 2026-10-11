@@ -45,6 +45,9 @@ final class Console
             'migrate' => fn (array $args) => Migrate::run(),
             'migrate:rollback' => fn (array $args) => Migrate::rollback(),
             'migrate:status' => fn (array $args) => Migrate::status(),
+            'plugins' => fn (array $args) => PluginsList::run(),
+            'doctor' => fn (array $args) => Doctor::run($args),
+            'retry:drain' => fn (array $args) => RetryDrain::run(),
             'list' => fn (array $args) => $this->list(),
             'help' => fn (array $args) => $this->help(),
         ];
@@ -63,8 +66,10 @@ final class Console
         $args = array_slice($this->argv, 2);
 
         try {
-            ($this->commands[$command])($args);
-            return 0;
+            $result = ($this->commands[$command])($args);
+            // Commands that return an int use it as the exit code;
+            // commands that return null are assumed successful.
+            return is_int($result) ? $result : 0;
         } catch (\Throwable $e) {
             fwrite(STDERR, 'Error: ' . $e->getMessage() . "\n");
             return 1;
@@ -92,5 +97,8 @@ final class Console
         echo "  php bin/tgbase migrate:rollback\n";
         echo "  php bin/tgbase make:language fa\n";
         echo "  php bin/tgbase make:button menu\n";
+        echo "  php bin/tgbase plugins          # list discovered plugins\n";
+        echo "  php bin/tgbase doctor           # run local diagnostics\n";
+        echo "  php bin/tgbase doctor --telegram  # also test getMe\n";
     }
 }

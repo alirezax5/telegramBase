@@ -1,6 +1,34 @@
+TelegramBase — flattened LLM context
+=====================================
+
+This file contains the complete documentation of TelegramBase
+(version v2.4.0) concatenated for LLM ingestion. Generated from
+README.md + docs/*.md + .env.example + CHANGELOG.md.
+Source of truth: the repository (https://github.com/alirezax5/telegramBase).
+
+
+======================================================================
+SECTION: PROJECT  (README.md)
+======================================================================
+
 # TelegramBase
 
-A modular PHP 8.1+ Telegram bot framework built on Illuminate components, with a plugin system, queue backends, session management, middleware pipeline, scheduler, migration runner, and CLI scaffolding.
+**English** · [فارسی](README.fa.md) · [中文](README.zh.md) · [Русский](README.ru.md) · [Français](README.fr.md) · [Português](README.pt.md) · [العربية](README.ar.md)
+
+A modular PHP 8.1+ mini-framework for building Telegram bots — with a plugin system, queue backends, webhook validation, sessions, middleware, scheduler, migrations, and CLI scaffolding. Built on Illuminate (Laravel) components instead of reinventing them.
+
+## What is this, in one paragraph?
+
+TelegramBase takes care of the *plumbing* every Telegram bot needs — receiving updates (polling or webhook), validating webhook requests, dispatching updates to your code, retrying failed API calls, and talking to queue backends like Redis and RabbitMQ — so you only write the *interesting* part: small PHP classes called **plugins** that react to messages. Drop a class into `Plugin/`, and the framework discovers and runs it. That's the whole idea.
+
+## Why does it exist?
+
+Writing a bot "directly against the API" is easy until real traffic arrives. Then you need answers to questions like: *What happens if my worker crashes mid-update? Where do webhook requests get validated? How do I retry a `429 Too Many Requests` without losing the update? Can I move heavy work off the HTTP request?* TelegramBase answers all of these up front:
+
+- **Six operation modes** (`update_direct`, `update_queue`, `webhook_direct`, `webhook_queue`, `cronjob_update`, `cronjob_queue`) — switch between polling and webhook, inline and queued processing, by changing one `.env` value.
+- **Honest delivery semantics** — the framework was crash-tested end-to-end (SIGKILL inside every stage of the pipeline). Every mode's guarantee is documented: webhook/direct paths are *at-least-once*, the RabbitMQ pipeline is *at-least-once* (ack-after-process), destructive drivers (Redis/JSON/Memcached) are *at-most-once*. See [docs/reliability.md](docs/en/reliability.md).
+- **Guarded against real misconfigurations** — running a CLI-only mode behind the webhook entry point is rejected with HTTP 500 instead of hanging your web worker in an infinite polling loop (a bug we actually hit in production testing).
+- **Batteries included** — sessions, keyboard builder, i18n, middleware (rate-limit / admin-guard / audit-log), scheduler, Eloquent migrations, bounded queues, automatic retry with Telegram's `retry_after`.
 
 ## Requirements
 
@@ -15,85 +43,285 @@ A modular PHP 8.1+ Telegram bot framework built on Illuminate components, with a
 ```bash
 git clone https://github.com/alirezax5/telegramBase.git
 cd telegramBase
+composer install
 cp .env.example .env
-# Set BOT_TOKEN in .env
+# Edit .env — set BOT_TOKEN (get one from @BotFather)
 php bot.php
 ```
 
-## Bot Modes
+Send your bot `/start` — the starter plugin in `Plugin/start.php` answers. Then write your own plugin (see [docs/plugins.md](docs/en/plugins.md)).
 
-Set `BOT_MODE` in `.env`:
-
-| Mode | Description |
-|------|-------------|
-| `update_direct` | Long-polling, process inline (default) |
-| `update_queue` | Long-polling, push to queue |
-| `webhook_direct` | Webhook, process inline |
-| `webhook_queue` | Webhook, push to queue |
-| `cronjob_update` | Cron-task polling (single slot) |
-| `cronjob_queue` | Cron-task queue processing (N slots) |
-
-## Folder Structure
+## How an update flows
 
 ```
-├── App/                    # Framework core
-│   ├── Attributes/         # PHP 8 attributes (ChatType)
-│   ├── Bootstrap/          # Boot sequence (Config, Language, Button, Plugins)
-│   ├── Bot/                # BotManager singleton
-│   ├── Button/             # Keyboard helper + Keyboard builder
-│   ├── Cache/              # CacheManager (array/file/redis/memcached/db)
-│   ├── Cli/                # CLI Console + Maker (scaffolding)
-│   ├── Config/             # AppConfig, RetryConfig, SessionConfig, SchedulerConfig
-│   ├── Connection/         # Redis/Memcached/RabbitMQ connection configs
-│   ├── Cron/               # CronManager + CronWorker
-│   ├── Database/           # DatabaseManager, MigrationRunner, Migrations/
-│   ├── Environment/        # EnvHandler + EnvironmentValidator
-│   ├── Enum/               # CoreMode enum
-│   ├── Language/           # i18n loader + helpers (__() )
-│   ├── Logger/             # LogHandler + LoggerConfig
-│   ├── Middleware/          # MiddlewareInterface, Pipeline + RateLimit/AuditLog/AdminGuard
-│   ├── Plugin/             # PluginHandler, PluginInterface, ChatType attribute
-│   ├── Queue/              # QueueManager, RetryQueue, RetryableException
-│   ├── Scheduler/          # Scheduler, ScheduledTask, TaskLock
-│   ├── Session/            # SessionManager, Session (cache-backed)
-│   ├── Storage/            # OffsetStorage, CacheStore, QueueStore
-│   └── Update/             # Fetcher, Processor, WebhookDispatcher
-├── Plugin/                 # Bot plugins (your code)
-├── Button/                 # Keyboard button definitions
-├── Language/               # Translation files (PHP arrays)
-├── Database/Migrations/    # Eloquent migration files
-├── bin/                    # Entry scripts (tgbase CLI, scheduler)
-├── AppData/                # Runtime data (queue, offsets, session, locks)
-├── logs/                   # Log files
-└── bot.php                 # Main entry point
+Telegram
+   │
+   ├─ getUpdates long-poll ──► bot.php ──┐
+   │                                     │
+   └─ webhook POST ──► webhook.php ──────┤
+                                         ▼
+                                    Core::run()
+                                         │
+                       validate (webhook)│mode routing
+                                         ▼
+                                    Processor
+                                         │
+                             middleware pipeline
+                                         ▼
+                              your plugins (Plugin/)
 ```
 
-## CLI Commands
+## Documentation
+
+Everything lives in `docs/` — start with the overview:
+
+| Document | What's inside |
+|----------|---------------|
+| [docs/overview.md](docs/en/overview.md) | What the framework is, what it does, what it deliberately doesn't do |
+| [docs/architecture.md](docs/en/architecture.md) | Boot sequence, update flow, component map of `App/` |
+| [docs/getting-started.md](docs/en/getting-started.md) | Install → first plugin → deploy, step by step |
+| [docs/bot-modes.md](docs/en/bot-modes.md) | All six `BOT_MODE`s, entry points, which processes to run |
+| [docs/plugins.md](docs/en/plugins.md) | Writing plugins: handlers, priority, `#[ChatType]`, discovery |
+| [docs/queue-pipeline.md](docs/en/queue-pipeline.md) | Queue backends, workers, retry queue, ack semantics |
+| [docs/webhook.md](docs/en/webhook.md) | Webhook setup, the 5 validation layers, proxy/CDN notes |
+| [docs/reliability.md](docs/en/reliability.md) | Crash-test results: delivery guarantees per mode, idempotency guidance |
+| [docs/configuration.md](docs/en/configuration.md) | Full `.env` reference |
+| [docs/features.md](docs/en/features.md) | Sessions, keyboards, middleware, cache, i18n, scheduler, database |
+| [docs/caching.md](docs/en/caching.md) | CacheManager deep dive: drivers, TTLs, flush reach, cross-process matrix (live-verified) |
+| [docs/sessions.md](docs/en/sessions.md) | Per-chat session state: API, multi-step flows, security notes |
+| [docs/i18n.md](docs/en/i18n.md) | Translations: file layout, `__()` helper, per-user language, caching |
+| [docs/buttons.md](docs/en/buttons.md) | Keyboard builder + file-defined menus (`btn()`), callback handling |
+| [docs/multi-bot.md](docs/en/multi-bot.md) | Multiple bots in one process: `BotManager`, `BOT_EXTRA_BOTS`, token stack (live-verified) |
+| [docs/testing.md](docs/en/testing.md) | Offline suite, live Telegram tests, smoke test, CI |
+| [docs/troubleshooting.md](docs/en/troubleshooting.md) | Common symptoms and fixes, deployment gotchas |
+
+Other useful files:
+
+- [CHANGELOG.md](CHANGELOG.md) — what changed in each version
+- [llms.txt](llms.txt) / [llms-ctx.txt](llms-ctx.txt) — LLM-oriented documentation index and single-file context
+- [.env.example](.env.example) — every configuration key with defaults
+- [examples/HelloBot.php](examples/HelloBot.php) — a complete example plugin
+
+## CLI
 
 ```bash
-php bin/tgbase <command> [arguments] [options]
-
-# Scaffolding
-make:plugin  <path>         Create a plugin class (options: --type=private|group|both)
-make:middleware <name>      Create a middleware class
-make:session <name>         Create a session helper
-make:language <code>        Create a language file (e.g. fa, en)
-make:button <code>          Create a button definition file
-make:migration <name>       Create a migration file (timestamped)
-
-# Database
-migrate                     Run pending migrations
-migrate:rollback            Rollback the last batch
-migrate:status              Show migration status
-
-# Utility
-list                        List all available commands
-help                        Show help
+php bin/tgbase list              # all commands
+php bin/tgbase make:plugin admin/ban   # scaffold a plugin
+php bin/tgbase doctor            # environment diagnostics
+php bin/tgbase plugins           # list discovered plugins
+php bin/tgbase migrate           # run database migrations
 ```
 
-## Writing a Plugin
+## License
 
-Create a file in `Plugin/` — the framework auto-discovers it:
+MIT
+
+
+======================================================================
+SECTION: DOC: OVERVIEW  (docs/en/overview.md)
+======================================================================
+
+# Overview — what TelegramBase is
+
+## The one-sentence version
+
+TelegramBase is a PHP framework that turns "talking to the Telegram Bot API" into "writing small plugin classes", while handling everything reliable bots need: update fetching, webhook validation, queueing, retries, and process lifecycle.
+
+## What it does
+
+Every Telegram bot — no matter how simple — needs the same skeleton:
+
+1. **Receive updates.** Either you ask Telegram "anything new?" (long-polling via `getUpdates`), or Telegram calls your HTTPS URL (webhook). TelegramBase supports both, selected by a single `.env` value.
+2. **Validate webhook requests.** Anyone can POST fake updates to your URL. TelegramBase checks body size, source IP (official Telegram subnets), an optional secret token, and JSON well-formedness before your code ever runs.
+3. **Route updates to your code.** A `Processor` normalizes the raw update object and hands it to every plugin whose filters match (chat type, priority order), optionally through a middleware pipeline.
+4. **Survive failure.** API calls can return `429 Too Many Requests`. Handlers can throw. Workers can be killed mid-update. Queue brokers can go down. TelegramBase has a story for each: a retry queue with exponential backoff (honoring Telegram's `retry_after`), bounded queue sizes, broker reconnection with backoff, and documented per-mode delivery guarantees.
+5. **Scale when needed.** Start with a single `php bot.php` process. When handling gets heavy, switch to a queue pipeline: a lightweight fetcher pushes updates into Redis/RabbitMQ and separate worker processes consume them.
+
+TelegramBase does all of this and exposes a small, boring, testable API surface.
+
+## What it deliberately doesn't do
+
+- **It is not a bot SDK.** The actual Telegram API calls come from [`alirezax5/telegram-bot-php`](https://github.com/alirezax5/telegram-bot-php) (the `Telegram` object injected into your plugins). TelegramBase is the layer *around* that SDK.
+- **It doesn't write your bot logic.** There's no "conversation builder" or admin panel. You write plain PHP classes; the framework schedules and feeds them.
+- **It doesn't hide PHP.** No custom DSL, no YAML bot definitions. If you know PHP 8 and the Telegram Bot API, you know how TelegramBase works.
+
+## Design philosophy
+
+- **Config over code.** Operation mode, queue backend, cache driver, language — all switched through `.env`, not by editing classes.
+- **Boring components.** Sessions, caching and locks are built on Illuminate (`illuminate/cache`, `illuminate/database`). These are the same components Laravel uses in production; TelegramBase adds no exotic dependencies.
+- **Honest about failure.** Every processing path has a documented delivery guarantee (at-least-once or at-most-once) — measured by killing real workers with SIGKILL during integration testing, not guessed. See [reliability.md](reliability.md).
+- **Fail loudly, not silently.** A CLI-only mode on a web entry point returns HTTP 500 with an explanation, rather than silently hanging. A full queue rejects and logs new pushes rather than eating your disk.
+
+## The shape of the codebase
+
+```
+App/          the framework (one concern per subdirectory)
+Plugin/       YOUR plugins (auto-discovered)
+Button/       keyboard label definitions
+Language/     translation files
+Database/     Eloquent models + migrations
+bin/          CLI tools (tgbase, scheduler)
+docs/         documentation (you are here)
+tests/        offline + live test suite
+```
+
+Everything in `App/` is served to you through a handful of entry classes: `Core` (run modes), `Processor` (update dispatch), `QueueManager` (queue backends), `SessionManager` (per-chat state), `Keyboard` (fluent keyboards), `LogHandler` (logging). The rest is plumbing those five need.
+
+## Where to go next
+
+- [getting-started.md](getting-started.md) — install and run your first bot
+- [architecture.md](architecture.md) — how the pieces fit together
+- [bot-modes.md](bot-modes.md) — choosing between the six operation modes
+
+
+======================================================================
+SECTION: DOC: ARCHITECTURE  (docs/en/architecture.md)
+======================================================================
+
+# Architecture — how the pieces fit together
+
+## The boot sequence
+
+Every entry point (CLI or web) constructs one object: `Core`.
+
+```php
+$core = new Core(CoreMode::FULL);   // FULL = boot plugins too
+$core->run();
+```
+
+The constructor runs the boot chain, in order:
+
+| Step | Class | What happens |
+|------|-------|--------------|
+| 1 | `Bootstrap::boot()` | Loads `.env` (via `EnvHandler`), validates the environment (`EnvironmentValidator`), prepares paths (`Paths`, `AppData/`), connects cache |
+| 2 | `BotManager::getInstance()->get()` | Creates the `Telegram` SDK instance from `BOT_TOKEN` (singleton — every component shares one instance) |
+| 3 | `PluginsBootstrap::boot()` *(FULL only)* | Scans `PLUGINS_DIR`, instantiates plugin classes, sorts by priority, builds the `PluginHandler` registry |
+
+`CoreMode::UPDATES_ONLY` (used by `queue.php`) skips step 3 — the fetcher only pushes updates into the queue, it never dispatches plugins itself.
+
+## The update flow
+
+```
+                 ┌──────────────────────────────────────────────┐
+                 │                  Core::run()                 │
+                 └──────────────────────────────────────────────┘
+                                    │
+              route by BOT_MODE + SAPI (CLI vs HTTP) — see bot-modes.md
+                                    │
+        ┌───────────────┬───────────┴──────────┬─────────────────┐
+        ▼               ▼                      ▼                 ▼
+   PollingLoop    WebhookDispatcher        QueueWorker       CronManager
+   (getUpdates    (validate + dispatch     (pop from queue   (cron slots →
+    in a loop)     one webhook payload)     + process)        poll/worker)
+        │               │                      │
+        └───────────────┴──────────┬───────────┘
+                                   ▼
+                              Processor::handle($update)
+                                   │
+                     normalize to object (shape-preserving —
+                     list arrays like photo sizes stay arrays)
+                                   │
+                                   ▼
+                       MiddlewarePipeline (optional)
+                                   │
+                                   ▼
+                     PluginHandler::runAll($update, $telegram)
+```
+
+Key points:
+
+- **One `Processor` per pipeline stage.** Polling, webhook and queue paths each build one; all of them attach the same middleware pipeline you registered on `Core`.
+- **Shape-preserving normalization.** Updates arriving as arrays (from queue drivers) are converted to objects recursively — *list* arrays (photo sizes, entities, inline keyboard rows) stay arrays, associative maps become objects. This matters because Telegram models fields like `photo` as arrays and plugins do `foreach` over them.
+- **Failures inside `handle()`** are caught, logged with update context, and — when the error looks transient (`429`, `5xx`, timeout, curl error) — pushed into the `RetryQueue` with exponential backoff.
+
+## Component map of `App/`
+
+| Directory | Concern | Key classes |
+|-----------|---------|-------------|
+| `Attributes/` | PHP 8 attributes | `ChatType` (filter plugins by private/group/channel) |
+| `Bootstrap/` | Boot chain | `Bootstrap`, `PluginsBootstrap`, `QueueBootstrap` |
+| `Bot/` | SDK instance | `BotManager` (singleton), `BotConfig` |
+| `Button/` | Keyboards | `Keyboard` (fluent builder), `ButtonManager` (i18n labels) |
+| `Cache/` | Caching | `CacheManager` — array / file / redis / memcached / database drivers |
+| `Cli/` | CLI tooling | `Console`, `Maker` (scaffolding), `Migrate`, `Doctor`, `PluginsList`, `RetryDrain` |
+| `Config/` | Typed config | `Config` (registry), `AppConfig`, `SessionConfig`, ... |
+| `Connection/` | Brokers | `ConnectionManager` (Redis / Memcached / RabbitMQ, singletons with liveness checks) |
+| `Core.php` | Entry | Mode routing, middleware registration, `run()`, `runFetchQueueUpdate()` |
+| `Cron/` | Cron modes | `CronManager`, `CronWorker`, `WorkerLocker` (file-lock slots) |
+| `Database/` | Persistence | `DatabaseManager` (Eloquent), `MigrationRunner` |
+| `Enum/` | Enums | `CoreMode` (FULL / UPDATES_ONLY) |
+| `Environment/` | Env | `EnvHandler` (typed getters), `EnvironmentValidator` (boot-time validation) |
+| `Language/` | i18n | `Language` loader + `__()` helper |
+| `Logger/` | Logging | `LogHandler` (Monolog wrapper), `LoggerConfig` (path-traversal-safe) |
+| `Middleware/` | Pipeline | `MiddlewareInterface`, `MiddlewarePipeline`, built-ins: `RateLimitMiddleware`, `AdminGuardMiddleware`, `AuditLogMiddleware` |
+| `Plugin/` | Dispatch | `PluginHandler` (discovery + run), `PluginInterface` (your plugins implement it) |
+| `Queue/` | Queues | `QueueManager` (driver facade), drivers in `Drivers/` (json/redis/rabbitmq/memcached), `RetryQueue`, `RetryableException`, `QueueWorker` |
+| `Scheduler/` | Tasks | `Scheduler` (cron expressions), `TaskLock` |
+| `Session/` | State | `SessionManager::start($chatId)` → `Session` (cache-backed, TTL) |
+| `Shared/` | Per-update scratch | `SharedManagement` (cleared between iterations) |
+| `Storage/` | State files | `OffsetStorage` (getUpdates offset, `LOCK_EX` writes) |
+| `Update/` | Update flow | `Fetcher`, `PollingLoop`, `Processor`, `WebhookDispatcher`, `WebhookResponse` |
+
+## The three long-running process shapes
+
+1. **Polling worker** (`bot.php`, mode `update_direct`) — loops `getUpdates` → `Processor::handle()` → advance offset. Self-restarts every `POLLING_RESTART_INTERVAL` batches to keep memory bounded; run it under a supervisor.
+2. **Webhook worker** (`webhook.php`, FPM/Apache) — stateless per-request; Telegram only needs a timely status code. Heavy work belongs in a queue (mode `webhook_queue`).
+3. **Queue workers** (`queue.php` producer + `bot.php` consumer, modes `*_queue`) — fetcher pushes, workers pop. Any number of consumer processes; the broker spreads updates between them.
+
+## Where state lives
+
+| State | Location | Notes |
+|-------|----------|-------|
+| getUpdates offset | `AppData/lastupdate.txt` | `OffsetStorage`, atomic writes; only polling modes touch it |
+| Queue payloads | broker (or `AppData/queue/` for the json driver) | |
+| Retry items | `AppData/retry/` or Redis (per `RETRY_QUEUE_DRIVER`) | |
+| Sessions | cache driver (per `CACHE_DRIVER`) | TTL via `SESSION_TTL` |
+| Logs | `logs/` (per `LOG_DIR`) | path traversal rejected by config validation |
+
+`AppData/` is runtime-only and gitignored — recreate it by simply running the bot.
+
+
+======================================================================
+SECTION: DOC: GETTING STARTED  (docs/en/getting-started.md)
+======================================================================
+
+# Getting started
+
+## 1. Install
+
+```bash
+git clone https://github.com/alirezax5/telegramBase.git mybot
+cd mybot
+composer install
+cp .env.example .env
+```
+
+## 2. Configure
+
+Edit `.env` — the only **required** key is the bot token:
+
+```dotenv
+BOT_TOKEN="123456789:AAEhBP0..."    # from @BotFather
+BOT_MODE="update_direct"            # default: long-polling, process inline
+```
+
+Optional but recommended:
+
+```dotenv
+ADMIN_IDS="123456789"               # your Telegram user id (for AdminGuardMiddleware)
+LOG_ENABLED=true
+LOG_LEVEL=info
+```
+
+Run the self-check at any time — it never contacts Telegram unless you pass `--telegram`:
+
+```bash
+php bin/tgbase doctor
+```
+
+## 3. Write your first plugin
+
+Create `Plugin/greet.php`:
 
 ```php
 <?php
@@ -106,184 +334,1617 @@ use telegramBotApiPhp\Telegram;
 #[ChatType(['private'])]
 class greet implements PluginInterface
 {
-    public function getPriority(): int { return 10; }
+    public function getPriority(): int
+    {
+        return 10;
+    }
 
     public function onMessage($message, Telegram $Telegram): void
     {
-        $chatId = $Telegram->fromId();
-        $text   = $message->text ?? '';
-
-        if ($text === '/start') {
-            $Telegram->sendMessage($chatId, "Welcome!");
+        if (($message->text ?? '') === '/start') {
+            $Telegram->sendMessage($Telegram->fromId(), '👋 Hello from TelegramBase!');
         }
     }
 }
 ```
 
-> `$message` is the message object (not the full update) — use `$message->text`, `$message->chat->id`, etc.
+That's it — no registration step. The framework scans `Plugin/` at boot and discovers every class implementing `PluginInterface`. Verify with:
 
-### Handler methods
-
-| Method | Triggered when |
-|--------|---------------|
-| `onMessage` | Any text or media message |
-| `onCallback_query` | Inline button pressed |
-| `onCommand` | Slash command (e.g. `/start`) |
-| `before` | Runs before every update |
-| `after` | Runs after every update |
-
-### Attributes
-
-```php
-#[ChatType(['private', 'group'])]  // Restrict to chat types
+```bash
+php bin/tgbase plugins
 ```
 
-## Session
+Faster scaffolding (creates the file with the right namespace for you):
 
-Session state persists between messages, stored via the Cache driver:
+```bash
+php bin/tgbase make:plugin admin/ban --type=private
+# → Plugin/Admin/Ban.php  (namespace …\Plugin\Admin, class Ban)
+```
+
+## 4. Run
+
+Development (foreground):
+
+```bash
+php bot.php
+```
+
+Production — **always under a process supervisor** (systemd, supervisord, Docker `restart: always`). The polling worker self-restarts periodically to keep memory bounded, and the supervisor brings it back after crashes:
+
+```ini
+# /etc/systemd/system/mybot.service
+[Service]
+WorkingDirectory=/var/www/mybot
+ExecStart=/usr/bin/php bot.php
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+```
+
+Graceful shutdown: `SIGINT`/`SIGTERM` stop the worker at the next loop boundary (worst case ~`POLLING_TIMEOUT` seconds). No update is lost — Telegram redelivers anything you didn't confirm.
+
+## 5. Or switch to webhook mode
+
+```bash
+# .env
+BOT_MODE="webhook_direct"
+BOT_WEBHOOK_URL="https://yourdomain.com/webhook.php"
+BOT_WEBHOOK_SECRET="$(openssl rand -hex 32)"   # long random string
+WEBHOOK_CHECK_IP=true                           # default; disable behind Cloudflare/proxies
+```
+
+Register the webhook once:
+
+```bash
+curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://yourdomain.com/webhook.php&secret_token=<SECRET>"
+```
+
+Deploy `webhook.php` behind HTTPS — no supervisor needed for the webhook entry itself; Telegram's POSTs are stateless requests. Details (validation layers, proxies, queue mode) in [webhook.md](webhook.md).
+
+## 6. Next steps
+
+- Understand the six `BOT_MODE`s and when to use each → [bot-modes.md](bot-modes.md)
+- Add sessions, keyboards, middleware → [features.md](features.md)
+- Offload heavy handlers to a queue → [queue-pipeline.md](queue-pipeline.md)
+- Check what happens when things crash → [reliability.md](reliability.md)
+
+
+======================================================================
+SECTION: DOC: BOT MODES  (docs/en/bot-modes.md)
+======================================================================
+
+# Bot modes — the six ways to run a TelegramBase bot
+
+`BOT_MODE` in `.env` is the single most important configuration value. It decides *how updates arrive* (polling vs webhook) and *how they are processed* (inline vs queued).
+
+## The modes
+
+| Mode | Update source | Processing | Processes you run |
+|------|--------------|------------|-------------------|
+| `update_direct` *(default)* | `getUpdates` long-poll | inline, same process | `php bot.php` under a supervisor |
+| `update_queue` | `getUpdates` long-poll | async via queue | `php queue.php` (fetcher) + one or more `php bot.php` (workers) |
+| `webhook_direct` | Telegram webhook POST | inline, inside the HTTP request | web server only (`webhook.php`) |
+| `webhook_queue` | Telegram webhook POST | async via queue | web server (`webhook.php`) + `php bot.php` worker(s) |
+| `cronjob_update` | `getUpdates` (polling) | inline, **self-healing daemon** — the first tick starts an endless loop, later ticks no-op while it lives | crontab `* * * * * php bin/scheduler.php` |
+| `cronjob_queue` | queue only (no Telegram polling) | async batch — each tick consumes for up to `CRON_MAX_TIME` (default 50 s), then exits | crontab + `CRON_WORKER` slots |
+
+Mental model:
+
+- **`update_*` / `cronjob_*`** modes pull updates themselves (your server talks to Telegram).
+- **`webhook_*`** modes receive updates (Telegram talks to your server).
+- **`*_direct`** processes the update right where it arrives — simplest, and fine for most bots.
+- **`*_queue`** decouples receiving from processing — use it when handlers are slow (uploads, external APIs) or when you want horizontal scaling.
+- **`cronjob_*`** modes run from plain crontab — no supervisor, no systemd, no Docker required.
+
+## Cron modes in depth
+
+Both cron modes share the same safety mechanism: on every tick the framework tries to acquire a **worker slot** — an exclusive `flock()` on a lock file under `data/cron-slots/` (`WorkerLocker`). If all `CRON_WORKER` slots are busy, the tick logs `All N worker slots busy` and exits within milliseconds — concurrent ticks can never double-process anything.
+
+### `cronjob_update` — a self-healing daemon, not a batch
+
+Despite the name, a tick does **not** run "one batch". The first tick acquires the slot and starts the same endless polling loop as `update_direct` (`set_time_limit(0)` + long-poll), and the tick never finishes — by design:
+
+1. Tick 1 → daemon starts, slot stays locked.
+2. Ticks 2..N → find the slot busy, exit in milliseconds (measured: ~30–45 ms). This is *normal*, not an error.
+3. Daemon dies (crash, OOM, reboot) → the next cron tick starts a fresh daemon automatically. **Cron acts as the supervisor.**
+
+Verified live: a daemon started at 09:24:01, processed a real message inline, survived several minute boundaries, shut down gracefully on SIGTERM within one long-poll cycle (~12 s — the stop signal is honored as soon as the current long-poll returns), released the lock, and the very next tick restarted it.
+
+### `cronjob_queue` — a bounded batch worker
+
+Each tick acquires a slot and consumes from the queue for at most `CRON_MAX_TIME` seconds (default 50), then exits cleanly with `Limited worker finished: N updates`. Nothing polls Telegram in this mode — the queue must be fed by a producer (`webhook_queue`, or your own `queue.php` run).
+
+Verified live: a real message pushed into RabbitMQ at 09:22:49 was popped and dispatched by the tick that was already inside its 50-second window (plugin `onMessage` at 09:22:49.6, `Limited worker finished: 1 updates` at 09:22:51), and the queue drained back to 0/0. Delivery semantics are inherited from the queue driver — at-least-once with RabbitMQ since v2.4.0.
+
+### Cron configuration
+
+| Env | Default | Meaning |
+|-----|---------|---------|
+| `CRON_WORKER` | `1` | number of concurrent worker slots (flock files in `data/cron-slots/`) |
+| `CRON_MAX_TIME` | `50` | `cronjob_queue` batch window in seconds — keep it below your cron interval so ticks don't overlap |
+
+## Entry points and the SAPI guard
+
+| File | Runs as | Purpose |
+|------|---------|---------|
+| `bot.php` | CLI | polling (`update_direct`), queue consumer (`*_queue`), cron callbacks |
+| `queue.php` | CLI | queue *producer* — long-polls Telegram and pushes updates into the queue (`update_queue`) |
+| `webhook.php` | HTTP | receives Telegram webhook POSTs (`webhook_*`) |
+| `bin/tgbase` | CLI | diagnostics, scaffolding, migrations |
+| `bin/scheduler.php` | CLI | cron tick runner (`cronjob_*` + scheduled tasks) |
+
+**Important — the SAPI guard (v2.4.0):** an HTTP request can only serve webhook-style work. If `webhook.php` is executed while `BOT_MODE` is a CLI-only mode, the framework refuses to run an infinite loop inside your web worker:
+
+| `BOT_MODE` on `webhook.php` | Behaviour |
+|------------------------------|-----------|
+| `webhook_direct` | validate → process inline → `200` |
+| `webhook_queue` | validate → enqueue → `200` |
+| `update_direct` | validate → process inline → `200` (a warning is logged — you probably meant `webhook_direct`) |
+| `update_queue`, `cronjob_*` | **HTTP 500** with an explanatory message — no loop, no hang |
+
+Background: before this guard existed, pointing the webhook at a bot configured for `update_direct` silently started an infinite `getUpdates` loop inside the PHP-FPM worker. Telegram never got a response (`Read timeout expired` → endless retries) and FPM killed the worker at `request_terminate_timeout` (502). The guard turns that silent hang into a loud, fast failure. You can test the detection logic directly with `Core::isHttpSapi($sapi)`.
+
+> Rule of thumb: **CLI modes run from the terminal, webhook modes run from the web.** The framework enforces the boundary for you.
+
+## Delivery semantics at a glance
+
+| Path | Guarantee | Duplicate window |
+|------|-----------|------------------|
+| `webhook_direct` | at-least-once (Telegram retries until it gets a 2xx) | crash *after* `handle()` but before the 200 |
+| `update_direct` | at-least-once (offset advances only after processing) | crash *after* side effects but before the offset write |
+| `webhook_queue` (producer side) | the update is in the broker once you got your 200 | enqueue retries on broker failure |
+| queue consumer — **RabbitMQ** | at-least-once (ack after processing, v2.4.0) | crash between processing and ack |
+| queue consumer — Redis / JSON / Memcached | at-most-once (destructive pop — the job is gone at pop time) | a crash mid-processing loses the job |
+
+Full crash-test evidence and idempotency guidance: [reliability.md](reliability.md).
+
+`cronjob_update` behaves exactly like `update_direct` (one message processed inline before the offset advances); `cronjob_queue` behaves exactly like the queue consumer of its driver (at-least-once with RabbitMQ, at-most-once with Redis/JSON/Memcached).
+
+## Choosing a mode — practical advice
+
+- **Small bots, dashboards, prototypes** → `update_direct`. One process, zero infrastructure.
+- **Slow handlers (file processing, third-party APIs), multiple instances** → `webhook_queue` or `update_queue` with Redis/RabbitMQ.
+- **Shared hosting without CLI daemons** → `cronjob_update` (crontab becomes the supervisor) or `webhook_direct`.
+- **Want exactly-once?** Nobody has it. TelegramBase gives you *at-least-once* paths that never lose updates, and *at-most-once* paths that never duplicate — pick per use case, and make handlers idempotent (see [reliability.md](reliability.md)).
+
+
+======================================================================
+SECTION: DOC: MULTI-BOT  (docs/en/multi-bot.md)
+======================================================================
+
+# Multi-bot — running two bots in one process
+
+TelegramBase supports multi-bot operation at two levels: the underlying
+[`telegramBotPhp` library](https://github.com/alirezax5/telegramBotPhp) provides the
+primitives (independent instances, token stack, raw calls), and the framework adds a
+**`BotManager`** registry so plugins can reach secondary bots by name.
+
+Both owner-requested scenarios were verified live (2026-10-11) with two real bots:
+
+| Scenario | What happens | Verified result |
+|---|---|---|
+| **A — membership check via bot #2** | user asks bot #1; bot #1 executes `getChatMember()` **with bot #2's token** | `ok=true`, `status=member`, 13 ms |
+| **B — delegated send** | user asks bot #1; bot #1 makes **bot #2 send** the message, inside bot #1's process | delivered, 239 ms |
+
+---
+
+## Registering extra bots: `BOT_EXTRA_BOTS`
+
+Add the env var before boot (in `.env` or the process environment):
+
+```dotenv
+BOT_EXTRA_BOTS="second:398172019:AAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```
+
+Format rules:
+
+- entries are **comma-separated**; each entry is `name:token`;
+- split on the **first** colon only (a bot token itself contains a colon);
+- the name `main` is reserved for the primary bot and ignored in this list;
+- malformed entries are logged (warning) and skipped — boot never fails.
+
+`BotManager` is a singleton created on first use; the default bot (`main`) is built
+from `Config::bot()` (i.e. `BOT_TOKEN`), then extras are registered.
+
+## Using bots from a plugin
+
+```php
+use alirezax5\TelegramBase\App\Bot\BotManager;
+use alirezax5\TelegramBase\App\Plugin\Contract\PluginInterface;
+use telegramBotApiPhp\Telegram;
+
+class MultiBotPlugin implements PluginInterface
+{
+    public function getPriority(): int { return 1; }
+
+    public function onMessage($message, Telegram $tg): void
+    {
+        if ($message->text !== '/inchannel') {
+            return;
+        }
+
+        $bm  = BotManager::getInstance();
+        $userId = $tg->fromId();
+        $chatId = $tg->chatId();
+
+        // Scenario A — membership check executed by bot #2's identity
+        if ($bm->has('second')) {
+            $member = $bm->get('second')->getChatMember('@mychannel', $userId);
+            $status = $member->result->status ?? 'left';   // member|administrator|creator|left|kicked
+            $tg->sendMessage($chatId, "وضعیت عضویت شما (چک توسط ربات ۲): {$status}");
+        } else {
+            $tg->sendMessage($chatId, 'ربات دوم ثبت نشده — BOT_EXTRA_BOTS را تنظیم کنید');
+        }
+
+        // Scenario B — bot #1 sends AS bot #2 (token stack on the main instance)
+        if ($bm->has('second')) {
+            $tg->switchToken($bm->get('second')->getToken());
+            try {
+                $tg->sendMessage($chatId, 'این پیام با هویت ربات ۲ ارسال شد (داخل پروسه ربات ۱)');
+            } finally {
+                $tg->restoreToken();
+            }
+        }
+    }
+}
+```
+
+## API of `BotManager`
+
+| Method | Behavior |
+|---|---|
+| `getInstance(): BotManager` | singleton accessor |
+| `get(?string $name): Telegram` | returns the named bot; **unknown names fall back to `main`** (warning logged) |
+| `has(string $name): bool` | is the name registered? — **always check before `get()` of a non-default bot** |
+| `add(string $name, Telegram $bot): void` | register/overwrite a bot at runtime (overwriting logs a warning) |
+| `names(): string[]` | all registered names (`main` first) |
+| `setDefaultToken(string $token): Telegram` | overrides the **main** bot's token globally — affects every caller |
+
+## Why `has()` matters
+
+`get('typo-name')` does not throw — it silently returns the **main** bot. A
+`getChatMember()` meant for bot #2 would then be executed by bot #1's identity and
+return `chat member not found` or worse, a wrong-but-plausible answer. Guard every
+non-default access with `has()`.
+
+## Token management: many bots on one file
+
+One deployment (one entry file + one `.env`) can serve any number of bot
+identities. Three strategies are supported — ordered by recommendation:
+
+| # | Strategy | Tokens live where | Best for | Verified |
+|---|---|---|---|---|
+| 1 | **Static registry** — `BOT_TOKEN` + `BOT_EXTRA_BOTS` in `.env` | one `.env`, `name:token` pairs | a fixed set of bots deployed together | 23/23 checks (parse / identity / degrade / scale) |
+| 2 | **Dynamic registry** — `BotManager::add($name, new Telegram($token))` at runtime | your DB/config panel; passed into the process | bots provisioned by an admin panel, per-tenant bots | identity + delegated-send checks |
+| 3 | **Managed Bots** — child tokens fetched live from Telegram (next section) | **nowhere on disk** | a manager bot creating children on behalf of users | TM-2 suite, 8/8 |
+
+Rules the live test suite proves (2026-10-11, two real bots + synthetic entries):
+
+- malformed `BOT_EXTRA_BOTS` entries are logged and **skipped — boot never fails**;
+- a dead/revoked token fails clean (`ok=false`, `Unauthorized`) and never poisons
+  other bots: `get('dead')` errors, `get('alive')` and `main` stay healthy;
+- `main` is reserved; duplicate names resolve last-wins with a warning;
+- the token's own colon survives the `name:token` split (first colon only);
+- identity isolation: every registered instance's `getMe()` matches its token's
+  id prefix; the token stack is per-instance (switch/restore on `main` leaves
+  `second` untouched);
+- registry lookups are O(1): 10,000 `get()` calls with 32 registered bots in ~1 ms.
+
+Webhook note: in `webhook_*` modes every update hitting `webhook.php` is
+processed under the **main** bot's identity (one shared `BOT_WEBHOOK_SECRET`).
+To serve several bots over webhooks you do **not** need one directory per bot
+— the `secret_token` pattern in the next section runs **any number of bots
+from one single webhook file**, proven live.
+
+## One webhook file, many bots — the `secret_token` pattern
+
+You do NOT need one folder per bot. **One single webhook file can serve any
+number of bots.** The trick is the `secret_token` parameter of `setWebhook`:
+
+1. Pick a **different random secret for every bot** (only letters, digits,
+   `_` and `-` are allowed).
+2. Register the **same webhook URL** for every bot, each with its own secret:
+   `setWebhook?url=https://example.com/hook.php&secret_token=<this-bots-secret>`
+3. On every update Telegram sends that secret back in the header
+   `X-Telegram-Bot-Api-Secret-Token`.
+4. Your file reads the header, looks the secret up in a small registry
+   (`secret → bot token`) and processes the update under that bot's identity.
+
+```text
+             ┌─ bot A: setWebhook(url=hook.php, secret=SECRET_A)
+ Telegram ───┤
+             └─ bot B: setWebhook(url=hook.php, secret=SECRET_B)
+                         │   POST + header X-Telegram-Bot-Api-Secret-Token
+                         ▼
+               ┌───────────────────┐   SECRET_A → token A → act as bot A
+               │     hook.php      │
+               │  registry:        │
+               │  secret → token   │   SECRET_B → token B → act as bot B
+               └───────────────────┘
+```
+
+Why this is the recommended way to run a bot farm:
+
+- **the bot token never appears in a URL** — it cannot leak into access logs,
+  browser history or proxies;
+- the secret doubles as an **authenticity check** — a request without the
+  right secret is not from Telegram; answer `403` and drop it;
+- **adding bot #N+1 costs one `setWebhook` call and one registry line** — no
+  new files, no new deployment.
+
+Live proof (2026-10-11, two real bots, ONE file, real user traffic):
+
+| Event | Routed identity | Result |
+|---|---|---|
+| real `/start` on bot B | @instaroonxbot | replied, `ok:true` |
+| real tap on bot B's inline button (×2) | @instaroonxbot | `answerCallbackQuery` + reply, `ok:true` |
+| real tap on bot A's inline button | @emojiCustom_bot | `answerCallbackQuery` + reply, `ok:true` |
+| synthetic POST with secret A / secret B | correct bot each time | replied, `ok:true` |
+
+7/7 deliveries — every update hit the same file and every reply carried the
+correct bot identity. The bot token was never in any URL or header.
+
+Hardening rules for production:
+
+- the secret **is the routing key** — it must be unique per bot;
+- generate it randomly, 32+ characters from `[A-Za-z0-9_-]` (Telegram rejects
+  other characters); a 2-character secret is effectively no secret;
+- reject unknown or missing secrets with `403` before touching anything else;
+- never log tokens; log at most a short secret prefix;
+- rotating a secret = run `setWebhook` again for that bot (takes seconds).
+
+## Managed Bots (Bot API 9.6)
+
+Telegram Bot API 9.6 (2026-04-03) added **Managed Bots**: a bot with
+`can_manage_bots` (enabled in the @BotFather Mini App) can have other bots
+created and controlled under it. The child token never needs to be stored —
+the manager fetches it live with `getManagedBotToken(user_id)`.
+
+Framework support (v2.4.x):
+
+| API element (Bot API 9.6) | Framework surface |
+|---|---|
+| `User.can_manage_bots` (getMe) | `$tg->callRaw('getMe')->result->can_manage_bots` |
+| `managed_bot` update (`ManagedBotUpdated`) | dispatched to `onManagedBot($managedBot, $tg)` — added to the plugin whitelist |
+| `KeyboardButtonRequestManagedBot` | `Keyboard::reply()->requestManagedBot($text, $requestId, $suggestedName, $suggestedUsername)` |
+| `getManagedBotToken` / `replaceManagedBotToken` / `get·setManagedBotAccessSettings` | `BotManager::registerManagedBot()` / `refreshManagedBot()` / `managedBotAccessSettings()` |
+| `ManagedBotCreated` message field | visible in the payload inside `onMessage` |
+
+End-to-end flow (plugin sketch):
+
+```php
+use alirezax5\TelegramBase\App\Bot\BotManager;
+use alirezax5\TelegramBase\App\Button\Keyboard;
+
+// 1) offer creation (private chats only)
+$tg->sendMessage($chatId, 'Create your own bot:', [
+    'reply_markup' => Keyboard::reply()
+        ->requestManagedBot('➕ Create my bot', 1, 'MyHelperBot', 'my_helper_bot')
+        ->toArray(),
+]);
+
+// 2) the user completes the flow in Telegram → managed_bot update arrives
+public function onManagedBot($managedBot, $tg): void
+{
+    // fetches the child token live (getManagedBotToken) and registers it
+    BotManager::getInstance()->registerManagedBotFromUpdate($managedBot);
+}
+
+// 3) use the child bot — registered under its bot id
+BotManager::getInstance()->get((string) $managedBot->bot->id)
+    ->sendMessage($chatId, 'hello from the child bot');
+```
+
+Prerequisites (owner actions, one-time):
+
+1. Enable **management of other bots** for the manager bot in the @BotFather
+   Mini App — until then `getMe` reports `can_manage_bots: false` and the
+   creation request fails.
+2. The child-bot creation itself always happens on Telegram's side (user
+   consent); the framework only receives the `managed_bot` update and fetches
+   the token.
+
+Token hygiene: managed tokens live only in memory (the registry) — nothing is
+written to `.env` or logs. Rotating a child token via
+`BotManager::refreshManagedBot($userId, $name)` revokes the old token
+immediately and re-registers the new one.
+
+### Managed Bots — live end-to-end (2026-10-11)
+
+After the owner enabled **management of other bots** in the @BotFather Mini
+App, `getMe` flipped to `can_manage_bots: true` on both test bots and the full
+flow was exercised live:
+
+- the creation button built by `Keyboard::reply()->requestManagedBot(...)` was
+  sent in a private chat — Telegram accepted the framework's keyboard shape;
+- field detail worth knowing: for `KeyboardButtonRequestManagedBot` the
+  `request_id` must be a **Number** (unlike `request_chat` / `request_users`,
+  where it is a String — Telegram rejects a string with `Bad Request: can't
+  parse KeyboardButton: Field "request_id" must be a valid Number`);
+- once the user completes the creation form, the manager receives a
+  `managed_bot` update and fetches the child token live with
+  `getManagedBotToken(user_id)` — the demo then made the **child bot speak in
+  the owner's chat** with its own freshly fetched token (zero-on-disk).
+
+Enabling the same Mini App toggles also flipped, on both test bots:
+`supports_guest_queries`, `has_topics_enabled`,
+`supports_join_request_queries`, `can_connect_to_business` → all `true`.
+
+- Live update shape (captured 2026-10-11): `managed_bot.user` = the person who created the child (an ordinary user), `managed_bot.bot` = the child bot itself (`{id, is_bot: true, username, ...}`). Pass `managed_bot.bot.id` to `getManagedBotToken` — the creator's id fails with `Bad Request: user is not a bot`. The demo fetched the child token live and the child delivered a real message to its owner — zero tokens on disk.
+
+### Where to keep tokens and secrets
+
+| Storage | When it fits | Watch out |
+|---|---|---|
+| **`.env`** (`BOT_TOKEN` + `BOT_EXTRA_BOTS`) | a small, fixed set of bots | root-readable only; changes need a restart |
+| **DB registry table** (`bots`: id, name, token, secret, status) | bots added/removed at runtime, admin panels | encrypt the token column at rest (e.g. sodium); cache the registry so one update ≠ one DB query |
+| **Managed Bots (zero on disk)** | a manager bot creating children for users | needs `can_manage_bots`; token fetched live via `getManagedBotToken` |
+| **Derived secrets (HMAC)** — nothing stored | you control one master key | `secret = base64url(hmac_sha256(master_key, 'bot:' . bot_id))`; rotating the master key means re-registering every webhook |
+
+Recommendation for a growing bot farm: **DB registry (token encrypted at
+rest) + cached lookup + `secret_token` routing**, and **Managed Bots** for
+user-created children. Keep `.env` for the first manager bot only.
+
+### Keeping every bot's data separate
+
+When many bots share one deployment, each bot's data must stay exclusive to
+that bot. Namespace **every storage layer with the bot id** (`b{bot_id}`):
+
+| Layer | Rule |
+|---|---|
+| Cache | key prefix `b{bot_id}:` (set `CACHE_PREFIX` per bot at boot) |
+| Sessions | scope by **bot id + user id** — the same person talking to two bots is two different sessions |
+| getUpdates offset | **one offset file/key per bot** — a shared offset would feed one bot's updates to another |
+| Queue | one queue name per bot (`tgbase_b{bot_id}_updates`) or tag payloads with `bot_id` |
+| File storage | `data/bots/{bot_id}/…` |
+| Logs | one log file per bot (`logs/bot_{id}.log`) |
+| Database | shared tables get a `bot_id` column; true isolation = separate DB per bot |
+
+The webhook front-controller resolves `secret → bot` first, then boots the
+framework with that bot's token and namespace — every later read/write then
+stays inside the bot's own sandbox automatically.
+
+## Delivery semantics
+
+Multi-bot calls ride on the same HTTP client as every other API call:
+
+- retries/backoff and `retry_after` handling apply per instance;
+- the token stack is **per-instance state** — in queue workers each update is
+  processed by a fresh dispatch, so switch/restore pairs live inside one update's
+  lifetime; never rely on stack state across updates;
+- in `webhook_*` modes the same rules apply within the single FPM request.
+
+## Live verification harness
+
+`integration/TestBot/Plugin/MultiBotTestPlugin.php` (test harness, private chats):
+
+- `/multibot` — full suite: identity, isolation, cross-send (Scenario B),
+  membership via bot #2 (Scenario A), token-stack switch/restore;
+- `/mbchannel <chat>` — bot #2 `getChatMember` on an explicit `@channel`/chat id
+  (bot #2 must be admin/member of that chat).
+
+Evidence log: `runtime/p331/multibot.log` — final live run
+(2026-10-11 12:26:19): identity ✔, isolation ✔, cross-send ✔ (239 ms),
+membership ✔ (13 ms), token stack ✔ — **5/5 PASS in 393 ms**.
+
+Additional harness runs (2026-10-11, post-sync live runtime):
+
+- **TM-1 token-management suite** — 23/23 PASS across four cases:
+  `parse` (7), `identity` (8, two real bots), `degrade` (5, revoked token),
+  `scale` (3, 32 bots / 10k lookups).
+- **TM-2 Managed Bots suite** — 8/8 PASS: live `getMe` exposes
+  `can_manage_bots`; `getManagedBotToken` / `getManagedBotAccessSettings`
+  reachable with clean error contracts; synthetic `managed_bot` update
+  dispatches `before → onManagedBot`; invalid `registerManagedBot()` throws
+  cleanly without poisoning the registry; `requestManagedBot()` keyboard
+  shape matches `KeyboardButtonRequestManagedBot`.
+
+
+======================================================================
+SECTION: DOC: CACHING  (docs/en/caching.md)
+======================================================================
+
+# Caching — CacheManager
+
+One static API over four interchangeable drivers, configured entirely through `.env`. Sessions, translations, button definitions and (optionally) plugin discovery all ride on this layer — switching the driver changes the persistence story of the whole framework without touching code.
+
+```php
+use alirezax5\TelegramBase\App\Cache\CacheManager;
+```
+
+> Every claim in this document was verified live (2026-10-11) against real backends on a production server: the 17-check suite ran green on `array`, `file`, `memcached` (PHP 8.5) and `redis`, plus a 9-point cross-process persistence matrix for each persistent driver. See the *Live verification* section at the bottom and [CHANGELOG](../../CHANGELOG.md).
+
+## Drivers
+
+| `CACHE_DRIVER` | Backend | Cross-process | Tags | Notes |
+|---|---|---|---|---|
+| `array` (default) | per-process memory | ✗ | ✗ | zero-config; state lives exactly as long as the process |
+| `file` | disk, `CACHE_PATH` | ✓ | ✗ | no extra services; hashed 2-level dirs; PHP-serialized payloads |
+| `redis` | phpredis ext (`redis.so`) | ✓ | ✗ | JSON payloads; recommended for multi-process deployments |
+| `memcached` | `memcached` ext + server | ✓ | ✗ | JSON payloads; volatile by nature |
+
+**Fallback chain (verified):** if the requested driver is unavailable — extension missing, server unreachable, auth failed, path not writable — the framework logs a warning and **falls back to `array`** instead of failing boot. Requesting `memcached` on a PHP without the ext produced exactly this: `driver=array`, everything else unchanged. Check what you actually got with `CacheManager::getDriver()`.
+
+> ⚠️ The `array` driver is process-local. A polling daemon is *one* long-lived process, so `array` "works" there; but webhook (per-request FPM workers) and queue workers (one process per worker) never share state. If sessions, counters or `remember()` need to survive across messages/processes, use `file`, `redis` or `memcached`. This was demonstrated live: values written in process A and read in process B — persist on all three, `<MISS>` on `array` (by design).
+
+## Configuration (.env)
+
+```dotenv
+CACHE_DRIVER=file            # array | file | redis | memcached
+CACHE_PREFIX=tgbase_         # key namespace (also the flush() safety boundary)
+CACHE_TTL=3600               # default TTL seconds when put() has no explicit ttl
+CACHE_PATH=/tmp/tgbase-cache # file driver only
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_PASSWORD=              # required if the server has requirepass (NOAUTH otherwise)
+REDIS_DATABASE=0
+MEMCACHED_HOST=127.0.0.1
+MEMCACHED_PORT=11211
+```
+
+## API
+
+| Method | Behavior |
+|---|---|
+| `get($key, $default = null)` | value or default on miss/expiry |
+| `put($key, $value, ?int $ttl = null)` | store; `null` ttl → `CACHE_TTL` |
+| `remember($key, callable $cb, ?int $ttl = null)` | return cached value or execute `$cb`, cache the result |
+| `has($key)` | exists and not expired |
+| `forget($key)` | delete one key |
+| `flush()` | delete **all keys of this framework's namespace** — see per-driver notes |
+| `increment($key, $by = 1)` / `decrement($key, $by = 1)` | counters |
+| `getDriver()` / `isInitialized()` / `tagsSupported()` | introspection |
+| `putWithTags()` / `getWithTags()` / `rememberWithTags()` / `flushTags()` | tag-style API that works on every driver (prefix-based fallback) |
+| `tags([...])` | native tagged cache — **throws** unless the driver supports tags (none of the four do) |
+
+### TTL semantics (verified with real waits)
+
+`put('k', 'x', 2)` → `has` true → after 3 s → `has` false, `get` returns default. Backend TTLs match config exactly: a 300 s entry showed `ttl=297s` under `redis-cli`, a 3600 s session `ttl=3597s`, a 60 s translation cache `ttl=57s`. Expired entries in `file`/`redis` are removed lazily (on access) or by the backend (`redis` setex).
+
+### Storage formats
+
+- **redis** — `setex` with `json_encode(JSON_UNESCAPED_UNICODE)`. Payloads must be JSON-round-trippable: scalars and arrays yes; PHP objects come back as arrays; no resources.
+- **memcached** — JSON via the same store family; values transparently (un)serialized by the ext.
+- **file** — PHP `serialize()` payloads, expiry stamp first, under `CACHE_PATH/ab/cd/<sha1>`.
+- **array** — plain PHP variables; nothing touches disk or network.
+
+### Key layout (raw backend view)
+
+| Driver | Raw key for `put('lang:fa', …)` with `CACHE_PREFIX=tgbase_` |
+|---|---|
+| redis | `tgbase_lang:fa` |
+| memcached | `tgbase_:lang:fa` (Illuminate appends `:` to the prefix) |
+| file | `CACHE_PATH/<h1>/<h2>/<sha1>` |
+
+### Counters — one nuance (verified)
+
+`increment()` on a **missing** key: `array`/`file`/`redis` create it (`incBy`), `memcached` returns `false` (Illuminate sends no initial value). Portable pattern: seed first — `CacheManager::put($k, 0, $ttl); CacheManager::increment($k);`
+
+### flush() — per-driver reach
+
+- `array` — this process only.
+- `file` — everything inside `CACHE_PATH` (dedicated dir; safe).
+- `redis` — **prefix-scoped**: `SCAN`-iterates `{CACHE_PREFIX}*` and `UNLINK`s only those keys. Safe on shared instances (verified on a Redis shared with WordPress object caches — other keys untouched). Refuses to run with an empty prefix.
+- `memcached` — ⚠️ `MemcachedStore::flush()` issues a server-wide `flush_all`. On a **shared** memcached this nukes other applications' cache — skip it there (the test suite deliberately does).
+
+## What rides on the cache
+
+| Consumer | Key | TTL knob |
+|---|---|---|
+| [Sessions](sessions.md) | `tgbase:session:{chatId}` | `SESSION_TTL` (default 3600, min 60) |
+| [Translations](i18n.md) | `lang:{lang}`, `lang:missing_keys` | `LANG_CACHE_TTL` (default 60) |
+| [Button definitions](buttons.md) | `buttons:all` | `BUTTONS_CACHE_TTL` (default 300), off switch `BUTTONS_CACHE_ENABLED` |
+| Plugin discovery | (internal) | `PLUGIN_CACHE_ENABLED` + `PLUGIN_CACHE_TTL` |
+
+## Live verification (P-CACHE, 2026-10-11)
+
+| Suite | Result |
+|---|---|
+| 17-check in-process suite × `array` / `file` / `memcached` (PHP 8.5) / `redis` | **PASS** on all |
+| memcached requested on PHP 8.4 (no ext) → graceful `array` fallback | **PASS** (documented chain) |
+| Cross-process matrix (`set` proc → `get` proc): scalar, nested array, counter 5→6, `remember` returns the *planted* random, session id + payload continuity, `lang:fa` payload, `buttons:all` payload | **9/9 PASS** on `file`, `redis`, `memcached`; `array` misses exactly as documented |
+| Backend inspection | redis keys with live TTL countdown; memcached raw keys under `tgbase_:`; file store with visible expiry stamps |
+| Real pipeline: `/cache demo hello` (dispatch 1) → `/cache demo` (dispatch 2, fresh process) → `demo = hello`; `/session-set`/`/session-get` same | **PASS** |
+
+One real defect was found and fixed by this exercise: **`CacheRedisStore::flush()` terminated its SCAN loop on the first empty MATCH page** (common on shared/large keyspaces) — deleting nothing while returning `true` (P-CACHE-F001 in the CHANGELOG).
+
+
+======================================================================
+SECTION: DOC: SESSIONS  (docs/en/sessions.md)
+======================================================================
+
+# Sessions — SessionManager
+
+Per-chat state that survives between messages: multi-step form wizards, "press 1 for…", shopping carts, per-user mode toggles. Sessions are stored through [CacheManager](caching.md), keyed by chat id, with a TTL so idle conversations expire automatically.
+
+```php
+use alirezax5\TelegramBase\App\Session\SessionManager;
+```
+
+## API
+
+```php
+// Start (or resume) a session — creates one when none exists
+$session = SessionManager::start($chatId);
+
+$session->set('step', 'waiting_email');        // persists immediately
+$session->setMany(['cart' => ['item1'], 'lang' => 'fa']);
+$step = $session->get('step');                  // null when unset
+$step = $session->get('step', 'default');       // with fallback
+$session->has('step');                          // true even when value is null
+$session->all();                                // whole payload as array
+$session->forget('cart');                       // remove one key
+$session->regenerate();                         // new random session id (after login!)
+$session->touch();                              // refresh last-activity
+$session->destroy();                            // delete entirely
+
+// Read WITHOUT creating (null when absent — use in read-only paths)
+$existing = SessionManager::get($chatId);
+SessionManager::has($chatId);
+SessionManager::flush($chatId);                 // delete
+```
+
+Under the hood the whole payload is one cache entry:
+
+| Cache key | `SESSION_PREFIX` (default `tgbase:session:`) + chat id |
+|---|---|
+| TTL | `SESSION_TTL` (default 3600 s, floor 60 s) — **every `set()` re-persists and resets the window** |
+| Payload | `['id' => sessionId, 'data' => […], 'last_activity' => ts]` |
+
+## A multi-step flow
+
+```php
+public function onMessage($message, Telegram $tg): void
+{
+    $text = trim($message->text ?? '');
+    $chatId = $tg->chatId();
+
+    $session = SessionManager::start($chatId);
+
+    switch ($session->get('step')) {
+        case null:
+            if ($text === '/register') {
+                $session->set('step', 'ask_email');
+                $resp = $tg->sendMessage($chatId, 'ایمیلت را بفرست:');
+                tg_retryable($resp, 'sendMessage');
+            }
+            return;
+
+        case 'ask_email':
+            if (!filter_var($text, FILTER_VALIDATE_EMAIL)) {
+                $resp = $tg->sendMessage($chatId, 'ایمیل معتبر نیست — دوباره بفرست:');
+                tg_retryable($resp, 'sendMessage');
+                return;                              // stay on the same step
+            }
+            $session->setMany(['email' => $text, 'step' => 'done']);
+            $resp = $tg->sendMessage($chatId, "ثبت شد: {$text}");
+            tg_retryable($resp, 'sendMessage');
+            return;
+    }
+}
+```
+
+Each user has an independent state machine because the session is keyed by chat id.
+
+## Which cache driver do I need?
+
+- **Polling daemon (`update_direct` / `update_queue` fetcher):** one long-lived PHP process — even `array` keeps state alive between messages. But the state dies on restart.
+- **Webhook (`webhook_*`) and queue workers:** state must cross process boundaries → `file`, `redis` or `memcached`.
+
+Verified live: a session written in process A (`sid d5dfbf11…`, step + cart) was read back in a fresh process B on `file`, `redis` and `memcached` — **same session id, identical payload**; on `array` process B saw nothing (documented).
+
+## Security notes
+
+- `regenerate()` after any privilege change (login) to prevent session fixation — the id is a fresh 32-hex random.
+- Sessions carry no identity of their own: the chat id is the key. In group chats every member shares the chat's session — for per-user state in groups, key by `$tg->fromId()` in your own cache keys instead.
+- Long-idle sessions expire silently (`SESSION_TTL`); design flows to tolerate a missing session (`SessionManager::get() === null` → start over).
+
+## Test commands (integration/TestBot)
+
+`/session` dumps id + keys + data · `/session-set <k> <v>` · `/session-get <k>` · `/session-clear`. The set/get pair was executed through the real plugin pipeline in two separate processes as part of the P-CACHE verification.
+
+
+======================================================================
+SECTION: DOC: I18N  (docs/en/i18n.md)
+======================================================================
+
+# i18n — Language
+
+Translation files, the `__()` helper, and automatic caching of compiled language maps.
+
+```php
+use alirezax5\TelegramBase\App\Language\Language;
+```
+
+## File layout
+
+Everything lives under `LANG_DIR` (default `/Language`, resolved against the project base — `Bootstrap` wires `Paths::base() . LANG_DIR` for you).
+
+```
+Language/
+├── fa.php            # main file for 'fa' — keys as-is
+└── fa/               # optional subdirectory — keys get a '<filename>.' prefix
+    ├── main.php      #   → main.ali, main.other, …
+    └── buttons.php   #   → buttons.save, buttons.cancel, …
+```
+
+- The **main file** is `{LANG_DIR}/{lang}.php`; the **subdirectory** is `{LANG_DIR}/{lang}/` and every file in it is loaded alphabetically with the file basename as key prefix.
+- Nested arrays are flattened to **dot notation**: `['btn' => ['btna' => 'hi']]` → `btn.btna`.
+- File format follows `LANG_DRIVER`:
+
+> ⚠️ **`LANG_DRIVER` must match your file format.** The default is `json`, but the repo ships PHP-array files (`fa.php`, `fa/main.php`) and `.env.example` sets `LANG_DRIVER="php"`. With the mismatch (json driver + .php files) every lookup silently falls back to the key name — no error, just untranslated text. This exact scenario was reproduced during the P-CACHE live tests: `__('key')` returned `"key"` until `LANG_DRIVER=php` was set.
+
+```dotenv
+LANG_DRIVER=php        # json | php — format of the language files
+DEFAULT_LANG=fa        # boot language (Persian, RTL)
+LANG_DIR=/Language
+LANG_CACHE_TTL=60      # seconds the compiled map stays in cache
+```
+
+## The `__()` helper
+
+```php
+// translations: 'welcome' => 'سلام #name خوش آمدی'
+__('welcome', ['name' => 'علی']);          // "سلام علی خوش آمدی"
+__('missing_key', 'پیش‌فرض');              // fallback when the key is absent
+__('missing_key');                          // falls back to the key name itself
+```
+
+Replacements use the `#placeholder` syntax; the map keys are written without the `#`:
+
+```php
+__('greeting', 'default', ['name' => $firstName, 'count' => 3]);
+```
+
+Language singleton:
+
+```php
+$lang = Language::getInstance();
+
+$lang->setLanguage('en');        // switch language (per process — call it per update if users differ)
+$lang->get('key', $default, $replacements);
+$lang->has('key');               // exists in the current language?
+$lang->getAll();                 // full flat map
+$lang->getCurrentLanguage();
+
+$lang->reloadLanguage('fa');     // drop cache + re-read files
+$lang->clearCache();             // forget lang:* cache keys
+$lang->getCacheStats();          // per-language entry counts + freshness
+```
+
+## Per-user language in a plugin
+
+`Language` is a per-process singleton — the current language applies to everything that runs after `setLanguage()` in that process. For per-user language selection (webhook/queue deployments), resolve and set it at the top of the handler:
+
+```php
+$userLang = $session->get('lang', 'fa');          // or read from your users table
+Language::getInstance()->setLanguage($userLang);
+$tg->sendMessage($chatId, __('menu_title'));
+```
+
+In a single-process polling daemon, a mid-update switch leaks to subsequent updates unless you switch back — prefer setting it per update unconditionally.
+
+## Caching behavior (verified)
+
+The first load of a language reads the files, flattens the map, and stores it under the cache key `lang:{lang}` with `LANG_CACHE_TTL`. Subsequent loads (including fresh processes) hit the cache — the P-CACHE run showed the full payload (`{"key":"value","btn.btna":"hi","main.ali":"asfaf132"}`) surviving cross-process on `file`, `redis` and `memcached`, with the backend TTL counting down from exactly 60 s. Missing translation keys are tracked in `lang:missing_keys` and flushed once per update iteration (`Core::cleanup()` → `flushMissingKeys()`), which makes debugging untranslated strings trivial — check the cache/logs for the key list.
+
+## Scaffolding
+
+```bash
+php bin/tgbase make:language en     # creates Language/en.php scaffold
+```
+
+`Language/fa.json.example` shows the JSON format if you prefer JSON files (then set `LANG_DRIVER=json`).
+
+
+======================================================================
+SECTION: DOC: BUTTONS  (docs/en/buttons.md)
+======================================================================
+
+# Buttons — Keyboard builder & ButtonManager
+
+Two complementary tools:
+
+- **`Keyboard`** — fluent, code-built reply markup for *dynamic* menus (rows depend on runtime data).
+- **`ButtonManager` / `btn()`** — *file-defined* fixed menus in `Button/`, translated labels, cacheable, shareable between plugins.
+
+```php
+use alirezax5\TelegramBase\App\Button\Keyboard;
+```
+
+## Keyboard builder
+
+### Inline keyboard (callback buttons)
+
+```php
+$kb = Keyboard::inline()
+    ->button('✅ تایید', 'order_confirm')      // text, callback payload
+    ->button('❌ انصراف', 'order_cancel')
+    ->row()                                     // next buttons go on a new row
+    ->button('راهنما', 'https://example.com', Keyboard::URL)
+    ->toArray();
+
+$resp = $tg->sendMessage($chatId, 'سفارش را تایید می‌کنید؟', ['reply_markup' => $kb]);
+tg_retryable($resp, 'sendMessage');
+```
+
+### Reply keyboard (the user's virtual keyboard)
+
+```php
+$kb = Keyboard::reply()
+    ->button('🔍 جستجو')
+    ->button('💳 خرید')
+    ->row()
+    ->button('⚙️ تنظیمات')
+    ->resize()        // fit text height
+    ->oneTime()       // hide after first tap
+    // ->selective()  // show only to mentioned users
+    ->toArray();
+```
+
+Remove a reply keyboard with a raw payload (or a `btn()` definition, see below):
+
+```php
+$tg->sendMessage($chatId, 'باشه', ['reply_markup' => ['remove_keyboard' => true]]);
+```
+
+### Builder API
+
+| Method | Applies to | Effect |
+|---|---|---|
+| `inline()` / `reply()` | constructor | callback keyboard / custom keyboard |
+| `button($text, $value = '', $type = CALLBACK)` | both | append to current row; `$type` one of `Keyboard::CALLBACK` (`callback_data`), `Keyboard::URL` (`url`), `Keyboard::SWITCH_INLINE`, `Keyboard::SWITCH_INLINE_CURRENT` |
+| `row()` | both | start a new row |
+| `resize($v)` | reply | `resize_keyboard` |
+| `oneTime($v)` | reply | `one_time_keyboard` |
+| `selective($v)` | reply | `selective` |
+| `inputPlaceholder($text)` | inline | `input_field_placeholder` |
+| `toArray()` / `toJson()` | both | final `reply_markup` value (array) / JSON string |
+
+Empty rows are dropped automatically; `toArray()` returns exactly the shape the Bot API expects for `reply_markup`.
+
+### Handling the taps
+
+Inline buttons arrive as updates of type `callback_query` — implement `onCallback_query()` in your plugin and route on `callback_data` (see [plugins.md](plugins.md)); answer them with `$tg->answerCallbackQuery($callbackQueryId)`. Reply-keyboard taps are ordinary text messages.
+
+## ButtonManager — file-defined buttons
+
+Definitions live in `BUTTONS_DIR` (default `/Button`) — the main file `BUTTONS_FILE` (default `btn.php`) plus any other `*.php` file in that directory, which gets a `'<filename>.'` key prefix (same pattern as the language loader).
+
+```php
+// Button/btn.php
+return [
+    "remove" => ['KeyboardRemove' => [], 'remove_keyboard' => true],
+
+    "start" => [
+        'keyboard' => [
+            [
+                ['text' => __('start')],           // translations work inside definitions
+                ['text' => __('messages.help')],
+            ],
+        ],
+        'resize_keyboard' => true,
+    ],
+];
+```
+
+```php
+use function alirezax5\TelegramBase\App\Button\btn;   // or the global btn() helper
+
+$kb  = btn('start');                       // whole definition → reply_markup
+$kb2 = btn('profile', ['ID' => 12]);       // {ID} and {{ID}} placeholders replaced everywhere
+$raw = btn('remove');                      // raw Telegram payload (KeyboardRemove)
+ButtonManager::has('start');               // exists?
+ButtonManager::getAll();                   // every definition
+ButtonManager::reload();                   // re-read files, refresh cache
+```
+
+Definitions are exactly "whatever the file returns" — most are ready-to-send `reply_markup` arrays, so `$tg->sendMessage($chatId, 'متن', ['reply_markup' => btn('start')])` is the whole story.
+
+## Caching (verified)
+
+Compiled definitions are cached under the key `buttons:all` with `BUTTONS_CACHE_TTL` (default 300 s) so the files are read once per TTL window, not per update. `BUTTONS_CACHE_ENABLED=false` turns the cache off entirely (definitions re-read from files every time) — this switch is wired end-to-end as of P-CACHE-F002 (previously it was read into config but never consulted; the fix was verified live in both states). `ButtonManager::reload()` forces a refresh at runtime.
+
+Cache key / reach follow [caching.md](caching.md): on `array` the cache is per-process; on `file`/`redis`/`memcached` the definitions are shared across workers.
+
+## Test commands (integration/TestBot)
+
+`/btn` (if present in your plugin set) — the shipped `StartPlugin` shows `btn('start')` in action; the P-CACHE suite verified `btn('start')` resolves (`rows=1`) and its payload persists cross-process under `buttons:all`.
+
+
+======================================================================
+SECTION: DOC: PLUGINS  (docs/en/plugins.md)
+======================================================================
+
+# Plugins — writing your bot's logic
+
+A plugin is one PHP class in `Plugin/` that implements `PluginInterface`. There is no registration, no config file, no service provider — drop the file in and the framework discovers it on the next boot.
+
+## Anatomy
+
+```php
+<?php
+namespace alirezax5\TelegramBase\Plugin;
+
+use alirezax5\TelegramBase\App\Attributes\ChatType;
+use alirezax5\TelegramBase\App\Plugin\Contract\PluginInterface;
+use telegramBotApiPhp\Telegram;
+
+#[ChatType(['private'])]
+class orderStatus implements PluginInterface
+{
+    // Lower runs first. Default 10. Use 1 for "always handle first".
+    public function getPriority(): int
+    {
+        return 10;
+    }
+
+    // Called for every message in an allowed chat type.
+    public function onMessage($message, Telegram $Telegram): void
+    {
+        $chatId = $Telegram->fromId();          // sender's user id
+        $text   = trim($message->text ?? '');
+
+        if ($text === '/status') {
+            $Telegram->sendMessage($chatId, 'All systems nominal ✅');
+        }
+    }
+
+    // Called when an inline button attached to one of your messages is pressed.
+    public function onCallback_query($callbackQuery, Telegram $Telegram): void
+    {
+        // always answer, or the sender's client shows a loading spinner:
+        $Telegram->answerCallbackQuery($callbackQuery->id);
+    }
+}
+```
+
+Notes:
+
+- `$message` is the **message object** (not the full update) — `$message->text`, `$message->chat->id`, `$message->photo`, etc.
+- The full update object (with `update_id`) is available as `$Telegram->getInputData()`.
+- A plugin with no `#[ChatType]` attribute runs for all chat types.
+
+## Handler methods
+
+| Method | Triggered when |
+|--------|----------------|
+| `onMessage` | any message (text, photo, document, ...) |
+| `onCallback_query` | an inline keyboard button is pressed |
+| `onCommand` | a `/slash_command` message |
+| `before` | before every update (any type) |
+| `after` | after every update |
+
+Implement only the handlers you need.
+
+## Chat-type filtering
+
+```php
+#[ChatType(['private'])]                   // private chats only
+#[ChatType(['group', 'supergroup'])]       // groups only
+#[ChatType(['channel'])]                   // channel posts
+```
+
+The attribute maps to Telegram's chat types, resolved by the SDK (`$Telegram->chatType()`).
+
+## Ordering and short-circuiting
+
+Plugins run in priority order for each handler. Any plugin can stop the chain simply by *not* calling further logic — but the cleaner tool for cross-cutting "reject" rules (bans, rate limits) is **middleware**, which runs before plugin dispatch for every update. See [features.md](features.md#middleware).
+
+## Discovery rules
+
+- Directory: `PLUGINS_DIR` in `.env` (default `/Plugin/`, relative to the project base; absolute paths are supported).
+- Files are scanned recursively; the class name must match the file name, PSR-4 style (`Plugin/Admin/Ban.php` → class `Ban` in namespace `…\Plugin\Admin`).
+- Plugin metadata (the discovered set) is cached; during development set `PLUGIN_CACHE_ENABLED=false` or use `PLUGINS_RELOAD_INTERVAL` to pick up new files without dumping caches manually.
+- Verify what the framework sees: `php bin/tgbase plugins` — shows priority, chat types and registered handlers per plugin.
+
+## A complete example
+
+[examples/HelloBot.php](../../examples/HelloBot.php) demonstrates the common patterns in one file:
+
+- routing `/hello` and `/status` commands
+- building an inline keyboard with the fluent `Keyboard` builder
+- per-chat state with `SessionManager`
+- safe API calls with `tg_retryable()` (throws `RetryableException` on 429/5xx → automatic retry queue)
+- answering and acting on callback queries
+
+To try it: copy the file into `Plugin/`, change the namespace to `alirezax5\TelegramBase\Plugin`, restart the bot.
+
+## Scaffolding
+
+```bash
+php bin/tgbase make:plugin users/register --type=private
+php bin/tgbase make:plugin admin/ban      --type=group
+```
+
+Path segments become PSR-4 namespaces (`users/register` → `Plugin\Users\Register`).
+
+
+======================================================================
+SECTION: DOC: QUEUE PIPELINE  (docs/en/queue-pipeline.md)
+======================================================================
+
+# Queue pipeline — when one process isn't enough
+
+## Why queue at all?
+
+Inline processing has a simple weakness: the process that *receives* the update must also *finish* handling it. If a handler uploads a 50 MB video or waits on a slow third-party API, the receiver is blocked (and in webhook mode, Telegram is waiting for its 200). The queue pipeline splits the work:
+
+```
+producer                          broker                    consumers (N processes)
+──────                            ──────                    ────────
+queue.php / webhook.php  ──push──► Redis / RabbitMQ ──pop──► bot.php workers
+(pick up updates fast,            (holds updates while       (do the slow work,
+ advance offset / 200)             nobody is around)          ack after processing)
+```
+
+Benefits: fast receipt (Telegram never waits on your handlers), horizontal scaling (run more workers), and crash isolation (a dying worker doesn't affect the receiver).
+
+## Choosing a driver
+
+| Driver | `QUEUE_SAVE_TYPE` | Needs | Pop behaviour | Guarantee on worker crash |
+|--------|-------------------|-------|---------------|---------------------------|
+| JSON | `json` *(default)* | nothing | destructive file read | **at-most-once** — job lost if crash mid-processing |
+| Redis | `redis` | `redis` extension + server | `LPOP` (destructive) | **at-most-once** — job lost if crash mid-processing |
+| Memcached | `memcached` | `memcached` extension + server | destructive get/delete | **at-most-once** |
+| RabbitMQ | `rabbitmq` | `amqp` extension + server | `basic_get` + **ack-after-process** (v2.4.0) | **at-least-once** — unacked job is redelivered |
+
+Pick RabbitMQ when losing a single update is unacceptable; pick Redis/JSON for throughput and simplicity when the occasional loss is tolerable (or when updates are cheap to reconstruct).
+
+## The RabbitMQ ack contract (v2.4.0)
+
+Since v2.4.0 the RabbitMQ driver uses **ack-late** semantics:
+
+1. `pop()` fetches a message and holds its delivery tag — the message is *not* acknowledged yet.
+2. Your handler runs.
+3. The worker calls `ack()` **after** processing. Only then does the broker delete the message.
+4. If the worker dies anywhere between 1 and 3, the broker redelivers the message to the next worker.
+
+Code-level, the worker does exactly this:
+
+```php
+$update = $queue->pop();
+try {
+    $processor->handle($update);
+} finally {
+    $queue->ack();   // success → done; handled exception → discarded (no poison loops)
+}
+```
+
+Consequences worth knowing:
+
+- **Duplicate processing is possible** (crash after handling but before the ack — the broker can't tell). Make handlers idempotent: store `update_id` before acting, skip if already seen. See [reliability.md](reliability.md).
+- A message that fails to decode is acked immediately (discarded) so it cannot poison the queue.
+- Custom queue drivers don't need to implement `ack()` — `QueueManager::ack()` is a no-op for drivers without broker-side acknowledgement.
+
+Configuration lives under the `rabbitmq` section of `.env` (host, port, user, password, vhost, queue name) — see [.env.example](../../.env.example).
+
+## Running the pipeline
+
+`update_queue` (polling producer):
+
+```bash
+# terminal 1 — fetcher: long-polls Telegram, pushes to the broker
+php queue.php
+
+# terminal 2..N — consumers: pop + process + ack
+php bot.php
+```
+
+`webhook_queue` (webhook producer):
+
+```bash
+# web server receives Telegram POSTs → validates → enqueues → 200
+# (webhook.php handles this automatically when BOT_MODE=webhook_queue)
+
+# terminal 1..N — consumers
+php bot.php
+```
+
+Run all of them under a supervisor. Workers reconnect to the broker automatically with exponential backoff (`BACKOFF_INITIAL=1s` … `BACKOFF_MAX=60s`), so you can restart Redis/RabbitMQ without touching the workers.
+
+## Bounded queues
+
+`QUEUE_MAX_SIZE` (default per [.env.example](../../.env.example)) caps how many updates may sit in the broker. When the limit is reached, new pushes are **rejected and logged** (WARNING), never silently dropped into an unbounded pile. This protects the disk/RAM when workers are down for a long time. Size 0 disables the cap.
+
+## The retry queue (separate from the main queue)
+
+The retry queue handles *transient handler failures* (HTTP `429`, `5xx`, timeouts, curl errors) for all modes, not just queued ones:
+
+- `Processor::handle()` catches a retryable error → pushes the update into `RetryQueue`.
+- Long-running workers drain due items on their maintenance tick (every loop iteration in queue workers).
+- Backoff doubles per attempt; when Telegram supplies `retry_after`, that exact value is honored (`RetryableException::retryAfter`).
+- After `RETRY_MAX_ATTEMPTS` the item is dropped and logged.
+
+Your handlers opt in with the `tg_retryable()` helper:
+
+```php
+use function alirezax5\TelegramBase\App\Queue\tg_retryable;
+
+$resp = tg_retryable($tg->sendMessage($chatId, 'Hello!'), 'sendMessage');
+// ok=true            → returned unchanged
+// 429 / 5xx          → RetryableException thrown → retry queue
+// other 4xx          → returned unchanged (permanent errors are not retried)
+```
+
+Configuration: `RETRY_ENABLED`, `RETRY_QUEUE_DRIVER` (`json`|`redis`), `RETRY_MAX_ATTEMPTS`, `RETRY_BASE_DELAY`, `RETRY_MAX_SIZE` — defaults in [.env.example](../../.env.example).
+
+
+======================================================================
+SECTION: DOC: WEBHOOK  (docs/en/webhook.md)
+======================================================================
+
+# Webhook — receiving updates from Telegram
+
+## Setup
+
+```dotenv
+# .env
+BOT_MODE="webhook_direct"          # or webhook_queue
+BOT_WEBHOOK_URL="https://yourdomain.com/webhook.php"
+BOT_WEBHOOK_SECRET="a-long-random-string"   # openssl rand -hex 32
+WEBHOOK_CHECK_IP=true
+```
+
+Register once (Telegram requires HTTPS with a valid certificate):
+
+```bash
+curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://yourdomain.com/webhook.php&secret_token=<SECRET>"
+curl "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"   # verify: pending_update_count=0, no last_error
+```
+
+Unregister (switching back to polling — do this *before* starting `bot.php`, two update sources fight over the same stream):
+
+```bash
+curl "https://api.telegram.org/bot<TOKEN>/deleteWebhook"
+```
+
+## The five validation layers
+
+Every request hitting `webhook.php` passes through `WebhookDispatcher`, in order:
+
+1. **Body size** — over 1 MB → `413`. (Telegram never sends larger payloads; anything bigger is not Telegram.)
+2. **IP whitelist** — with `WEBHOOK_CHECK_IP=true`, requests from IPs outside Telegram's official subnets → `403`. The ranges are the ones published in the Telegram docs (`149.154.160.0/20`, `91.108.4.0/22`, `91.108.8.0/22`, `91.108.56.0/22`, `91.108.16.0/22`, `95.161.64.0/20`).
+3. **Secret token** — with `BOT_WEBHOOK_SECRET` set, the `X-Telegram-Bot-Api-Secret-Token` header must match, compared with `hash_equals()` (timing-attack safe). Mismatch → `403`.
+4. **JSON validation** — the body must parse to an object containing `update_id`. Otherwise → `400`.
+5. **Routing** — `webhook_direct` runs plugins synchronously, then answers `200` only if nothing threw; `webhook_queue` enqueues and answers `200` immediately.
+
+Failing validation never consumes the update in a way that loses it — Telegram re-sends updates it didn't get a `2xx` for.
+
+## Behind Cloudflare / nginx proxies (important)
+
+If Telegram's requests reach PHP through Cloudflare (or any reverse proxy), PHP's `REMOTE_ADDR` is the *proxy's* IP, not Telegram's — the IP check would reject every request. Two working setups:
+
+- **Proxy in front:** keep `WEBHOOK_CHECK_IP=false` and rely on the **secret token** as your inbound authentication (make it long — 32+ hex chars). This is exactly how the framework was validated in production testing.
+- **Proxy passes the real IP:** configure your proxy to send `X-Forwarded-For` / `X-Real-IP` *and* have PHP trust it — then `WEBHOOK_CHECK_IP=true` works. Only do this if you control the proxy, otherwise the header can be spoofed.
+
+Rule of thumb: **IP check = direct exposure; secret = proxied exposure.** Using both is fine too.
+
+## Mode behaviour on the webhook entry
+
+| `BOT_MODE` | What `webhook.php` does |
+|------------|--------------------------|
+| `webhook_direct` | validate → `Processor::handle()` → `200` when done |
+| `webhook_queue` | validate → enqueue → `200` immediately |
+| `update_direct` | validate → `Processor::handle()` → `200` (works, but logs a warning — prefer `webhook_direct` explicitly) |
+| `update_queue`, `cronjob_*` | `500` + explanatory message — these modes are CLI-only |
+
+The last row is the v2.4.0 SAPI guard ([bot-modes.md](bot-modes.md)): a CLI mode on the web entry can no longer start an infinite loop inside your PHP-FPM worker (which used to end as `Read timeout expired` on Telegram's side and a 502 from your web server).
+
+## Response semantics — why 200 matters
+
+Telegram retries any webhook delivery that doesn't get a `2xx`, with backoff, for up to several hours. The framework exploits this honestly:
+
+- `200` is sent **only after** the update was processed (direct) or safely enqueued (queue mode).
+- An exception during handling → `500` → Telegram redelivers later → the update is **not lost**, but *will be processed twice* if the first attempt actually completed before the crash. That is the definition of at-least-once delivery — see [reliability.md](reliability.md) for making handlers idempotent.
+- A worker that takes minutes to respond is a bug, not a feature: Telegram's client timeout is ~60s. Move slow work into `webhook_queue`.
+
+## Registering with allowed updates (optional)
+
+Restrict what Telegram sends you to the update types your plugins actually handle:
+
+```bash
+curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=...&secret_token=...&allowed_updates=[\"message\",\"edited_message\",\"callback_query\",\"channel_post\",\"edited_channel_post\"]"
+```
+
+## Health checks
+
+`getWebhookInfo` is your dashboard — watch:
+
+- `pending_update_count` — updates queued at Telegram because your endpoint is failing/slow. Sustained growth = incident.
+- `last_error_message` / `last_error_date` — the exact delivery failure (timeouts, TLS errors, wrong secret).
+
+A deployment checklist for webhook mode:
+
+1. `webhook.php` reachable over HTTPS (test with a browser: an empty GET should give `400 empty` — that's the dispatcher answering).
+2. `BOT_WEBHOOK_SECRET` ≥ 32 random characters, identical in `.env` and `setWebhook`.
+3. `WEBHOOK_CHECK_IP` matches your network topology (see the proxy section).
+4. `getWebhookInfo` clean after a test message; your plugin's side effect visible.
+
+
+======================================================================
+SECTION: DOC: RELIABILITY  (docs/en/reliability.md)
+======================================================================
+
+# Reliability — what actually happens when things crash
+
+This document is unusual for a framework's docs: everything in it was **measured, not assumed**. During integration testing (phases 3.2–3.3), workers were killed with `SIGKILL` at every stage of every pipeline — during fetch, during queue push, mid-handler, after handler but before ack, before/after offset writes — and the outcome of every scenario was recorded. This page is the distilled result, and it drives both the framework's design and the advice below.
+
+## Delivery guarantees per path
+
+| Path | Guarantee | Why | Duplicate window |
+|------|-----------|-----|------------------|
+| Polling (`update_direct`) | **at-least-once** | the `getUpdates` offset is persisted only *after* `Processor::handle()` returns | crash after side effects, before offset write |
+| Webhook (`webhook_direct`) | **at-least-once** | the `200` is sent only after `handle()` returns; Telegram retries anything else | crash after side effects, before the 200 |
+| Webhook → queue (`webhook_queue`) | **at-least-once into the broker** | `200` only after a successful enqueue | broker outage between enqueue and 200 |
+| Queue consumer — **RabbitMQ** (v2.4.0) | **at-least-once** | ack-after-process: unacked messages are redelivered by the broker | crash after handling, before ack |
+| Queue consumer — Redis / JSON / Memcached | **at-most-once** | destructive pop — the message is removed at pop time | none (a crash mid-processing loses the job) |
+| Retry queue | **at-least-once, bounded** | items re-dispatched with backoff until `RETRY_MAX_ATTEMPTS` | same as its parent path |
+
+Two honest observations from the crash tests:
+
+- **Exactly-once does not exist.** Not in TelegramBase, not in any system built on top of a network. You choose between "never lose" (at-least-once, duplicates possible on crash) and "never duplicate" (at-most-once, losses possible on crash). The framework gives you both families and documents which is which.
+- **The duplicate windows are narrow but real.** They only open on a crash at the exact wrong moment. They close with idempotent handlers.
+
+## Making handlers idempotent (the practical 90%)
+
+At-least-once is only painful when the same update is *acted on* twice. One guard makes every window harmless:
+
+```php
+public function onMessage($message, Telegram $tg): void
+{
+    $update  = $tg->getInputData();
+    $uId     = $update->update_id ?? null;
+
+    // Cheap, atomic, per-update marker — works with any cache driver.
+    if (!empty(cache()->get("upd:{$uId}"))) {
+        return;                       // already processed (redelivery) — skip
+    }
+
+    // ... do the actual work ...
+
+    cache()->set("upd:{$uId}", 1, 3600);   // remember for an hour
+}
+```
+
+Store the marker *before* irreversible side effects where possible, and accept that a crash between marker and side effect converts a duplicate into a loss — pick the trade-off that fits the action (sending a message twice is usually cheaper than never sending it).
+
+## Crash behaviour by component
+
+| Component | Crash scenario | Observed behaviour |
+|-----------|---------------|--------------------|
+| Polling worker (`update_direct`) | `SIGKILL` mid-batch | offset unchanged → same updates redelivered on restart → reprocessed (idempotency matters) |
+| Polling worker | `SIGKILL` between batches | clean; at most the current update redelivered |
+| Queue fetcher (`queue.php`) | `SIGKILL` after pop, before push | update still on Telegram's side (offset not advanced) → redelivered |
+| Queue fetcher | `SIGKILL` after push, before offset write | update in broker **and** still on Telegram's side → producer restart would duplicate it into the broker (bounded by `QUEUE_MAX_SIZE`; consumers' idempotency absorbs it) |
+| RabbitMQ worker (pre-v2.4.0) | `SIGKILL` mid-processing | job **permanently lost** (ack had already been sent) — fixed in v2.4.0 |
+| RabbitMQ worker (v2.4.0+) | `SIGKILL` mid-processing | job **redelivered** to the next worker (unacked) |
+| Redis/JSON worker | `SIGKILL` mid-processing | job permanently lost (destructive pop) — by design, documented |
+| Webhook (FPM) | handler exceeds ~60 s | Telegram times out and retries; if the handler eventually completes, the retry duplicates it — keep webhook handling fast or use `webhook_queue` |
+| Broker down (any queue mode) | connection refused | workers back off exponentially (1 s → 60 s), reconnect and resume; fetcher keeps the offset until pushes succeed |
+
+## Bounded resources
+
+- **Queues are bounded** (`QUEUE_MAX_SIZE`, `RETRY_MAX_SIZE`): when full, pushes are rejected and logged — an outage cannot fill your disk silently.
+- **Memory is bounded**: the polling worker self-restarts every `POLLING_RESTART_INTERVAL` batches (configurable, `0` disables).
+- **Logs are path-traversal-safe**: `LOG_DIR`/`LOG_FILE` cannot point outside the project.
+
+## Error taxonomy used by the retry queue
+
+`RetryableException::isRetryable()` classifies errors so only *transient* failures are retried:
+
+- HTTP `429 Too Many Requests` (honoring Telegram's `parameters.retry_after` when present)
+- HTTP `5xx` / "server error"
+- timeouts (`timeout`, `timed out`, `connect`)
+- `cURL error N`
+- any `RetryableException` subclass you throw yourself
+
+Everything else (400 "chat not found", 403 "bot blocked", ...) is permanent — logged, not retried.
+
+## Testing your own reliability posture
+
+The shipped test suite includes the crash-relevant primitives (offset storage atomicity, queue drivers, retry lifecycle, webhook dispatcher validation paths):
+
+```bash
+php tests/run.php --filter=Queue     # queue driver behaviour
+php tests/run.php --filter=Offset    # offset storage
+php tests/run.php --filter=Retry     # retry lifecycle
+php tests/run.php --filter=Webhook   # webhook validation layers
+```
+
+For end-to-end confidence, repeat the integration approach on your own deployment: register the webhook, send a marker message, `kill -9` the worker mid-flight, and verify redelivery in `getWebhookInfo` / logs.
+
+
+======================================================================
+SECTION: DOC: CONFIGURATION (.env reference)  (docs/en/configuration.md)
+======================================================================
+
+# Configuration — the full `.env` reference
+
+Copy [.env.example](../../.env.example) to `.env` and edit. Values shown are defaults. Boot-time validation (`EnvironmentValidator`) checks the critical ones and fails with a readable message instead of a mystery crash.
+
+> Configuring through real environment variables only (systemd `Environment=`, `docker -e`, k8s) is equally supported — `.env` is optional. When both exist, the process environment wins (Dotenv is immutable).
+
+## Bot
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `BOT_TOKEN` | — | **required**; from @BotFather. Format-validated; never echoed in error messages. `TGBASE_SKIP_BOT_VALIDATION=1` lets DB-only CLI commands run without a token |
+| `BOT_MODE` | `update_direct` | one of the six modes — see [bot-modes.md](bot-modes.md) |
+| `BOT_API_URL` | `https://api.telegram.org` | override for local Bot API servers |
+| `POLLING_TIMEOUT` | `30` | long-poll seconds per `getUpdates` call |
+| `POLLING_RESTART_INTERVAL` | `100` | batches per self-restart (memory hygiene; `0` disables) |
+| `BOT_WEBHOOK_URL` | — | webhook endpoint URL (HTTPS) |
+| `BOT_WEBHOOK_SECRET` | — | secret for `X-Telegram-Bot-Api-Secret-Token`; use 32+ random hex chars (`openssl rand -hex 32`) |
+| `WEBHOOK_CHECK_IP` | `true` | validate `REMOTE_ADDR` against Telegram's subnets — set `false` behind Cloudflare/proxies (then the secret is your auth layer) |
+| `DATA_DIR` | `AppData` | runtime state (offset, queue files, locks) |
+
+## Plugins
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `PLUGINS_DIR` | `/Plugin/` | relative to project base; absolute paths supported |
+| `PLUGIN_CACHE_ENABLED` | `true` | cache discovered plugins between boots |
+| `PLUGINS_RELOAD_INTERVAL` | `0` | seconds between discovery re-scans (dev convenience) |
+
+## Language & buttons
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `LANG_DRIVER` | `json` | translation file driver — ⚠️ the shipped files are PHP arrays, so `.env.example` sets `php`; a mismatch silently falls back to the key name (see [i18n.md](i18n.md)) |
+| `DEFAULT_LANG` | `fa` | fallback language code |
+| `LANG_DIR` | `/Language` | translation files location |
+| `LANG_CACHE_TTL` | `60` | translation cache seconds |
+| `BUTTONS_DIR` | `/Button` | keyboard label definition files |
+| `BUTTONS_FILE` | `btn.php` | base file name |
+| `BUTTONS_CACHE_TTL` | `60` | label cache seconds |
+| `BUTTONS_CACHE_ENABLED` | `true` | set `false` to always re-read button definitions from files |
+
+## Queue
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `QUEUE_SAVE_TYPE` | `json` | `json` \| `redis` \| `rabbitmq` \| `memcached` |
+| `QUEUE_PATH` | `AppData/queue` | json driver storage dir |
+| `QUEUE_MAX_SIZE` | `0` | bounded-queue cap (0 = unlimited); full queue rejects + logs |
+| `QUEUE_MAX_RETRIES` | `3` | broker operation retries per push/pop |
+| `QUEUE_RETRY_DELAY` | `2` | seconds between broker retries |
+| `QUEUE_REDIS_KEY` / `QUEUE_MEMCACHED_KEY` | `bot_updates` | list key per driver |
+| `RABBITMQ_QUEUE` | `bot_updates` | RabbitMQ queue name |
+
+### Redis connection
+
+| Key | Default |
+|-----|---------|
+| `REDIS_HOST` | `127.0.0.1` |
+| `REDIS_PORT` | `6379` |
+| `REDIS_PASSWORD` | *(empty)* |
+| `REDIS_DATABASE` | `0` |
+| `REDIS_TIMEOUT` | `60` |
+
+### RabbitMQ connection
+
+| Key | Default |
+|-----|---------|
+| `RABBITMQ_HOST` | `127.0.0.1` |
+| `RABBITMQ_PORT` | `5672` |
+| `RABBITMQ_USER` | `guest` |
+| `RABBITMQ_PASSWORD` | `guest` |
+| `RABBITMQ_VHOST` | `/` |
+
+### Memcached connection
+
+| Key | Default |
+|-----|---------|
+| `MEMCACHED_HOST` | `127.0.0.1` |
+| `MEMCACHED_PORT` | `11211` |
+| `MEMCACHED_USERNAME` / `MEMCACHED_PASSWORD` | *(empty — SASL)* |
+
+## Retry queue
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `RETRY_ENABLED` | `true` | master switch |
+| `RETRY_QUEUE_DRIVER` | `json` | `json` \| `redis` |
+| `RETRY_MAX_ATTEMPTS` | `3` | then drop + log |
+| `RETRY_BASE_DELAY` | `2` | seconds; doubled per attempt; overridden by Telegram's `retry_after` |
+| `RETRY_MAX_SIZE` | `1000` | bounded queue cap |
+| `RETRY_REDIS_KEY` | `bot_retry_queue` | when driver is redis |
+
+## Cache & session
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `CACHE_DRIVER` | `array` | `array` \| `file` \| `redis` \| `memcached` — unsupported/unavailable drivers fall back to `array` with a logged warning |
+| `CACHE_PREFIX` | `tgbase_` | key prefix for all cache stores |
+| `CACHE_PATH` | system temp | file-driver directory |
+| `CACHE_TTL` | `300` | default TTL seconds when `put()`/`remember()` get no explicit TTL |
+| `SESSION_TTL` | `3600` | session lifetime seconds |
+| `SESSION_PREFIX` | `tgbase:session:` | session key prefix |
+
+## Database
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `DATABASE_ENABLE` | `false` | gates all DB bootstrapping (CLI works without a DB) |
+| `DB_DRIVER` | `mysql` | any PDO driver (`sqlite` for local dev) |
+| `DB_HOST` / `DB_PORT` | `127.0.0.1` / `3306` | |
+| `DB_DATABASE` / `DB_USERNAME` / `DB_PASSWORD` | — | |
+
+## Multi-bot
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `BOT_EXTRA_BOTS` | — | extra bots in one process — `name1:token1,name2:token2` (split on the first colon); see [multi-bot.md](multi-bot.md). Works in `.env` and in the process environment |
+
+## Scheduler & cron
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `SCHEDULER_LOCK_TTL` | `300` | task lock seconds |
+| `SCHEDULER_LOCK_TABLE` | `task_locks` | lock backend table |
+| `SCHEDULE_FILE` | `bin/tasks.php` | task file used by `bin/scheduler.php` (path override) |
+| `CRON_WORKER` | `10` | concurrent slots for `cronjob_queue` (file-locked) |
+| `CRON_MAX_TIME` | `50` | max seconds per cron tick for the worker |
+
+## Logging
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `LOG_ENABLED` | `true` | master switch |
+| `LOG_LEVEL` | `debug` | Monolog levels |
+| `LOG_DIR` | `./logs` | **relative names only** — absolute paths and `..` are rejected (path-traversal protection) |
+| `LOG_FILE` | `log.txt` | |
+
+## Admins
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `ADMINS_WHITELIST` | — | comma-separated Telegram user ids, used by `AdminGuardMiddleware` |
+
+## Security notes
+
+- Never commit `.env`; the provided `.gitignore` excludes it (`*.secret` and `secrets.json` too).
+- `EnvironmentValidator` error messages name the missing key, never its value.
+- Webhook secrets are compared with `hash_equals()` (constant time).
+- There is deliberately **no `VERIFY_TLS=false` knob** — TLS verification to api.telegram.org is always on.
+
+
+======================================================================
+SECTION: DOC: FEATURES  (docs/en/features.md)
+======================================================================
+
+# Features — the toolbox
+
+Everything in this document ships with the framework and is configured through `.env` (see [configuration.md](configuration.md)). Deep dives: [caching.md](caching.md) · [sessions.md](sessions.md) · [i18n.md](i18n.md) · [buttons.md](buttons.md) · [m[m[multi-bot.md](multi-bot.md).
+
+## Sessions
+
+Per-chat state that survives between messages, backed by your cache driver — full guide in [sessions.md](sessions.md):
 
 ```php
 use alirezax5\TelegramBase\App\Session\SessionManager;
 
-// Start or resume session
 $session = SessionManager::start($chatId);
 
-// Set / get values
 $session->set('step', 'waiting_email');
-$step = $session->get('step');
+$step = $session->get('step');            // null when unset
+$step = $session->get('step', 'default'); // with fallback
 
-// Persist automatically; TTL set by SESSION_TTL in .env
+// TTL via SESSION_TTL (default 3600s); state auto-expires after silence.
 ```
 
-### Config (.env)
+Typical use: multi-step flows (form wizards, "press 1 for..."). The session is keyed by chat id, so each user has an independent state machine.
 
-```
-SESSION_TTL=3600
-SESSION_PREFIX="tgbase:session:"
-```
+## Keyboard builder
 
-## Keyboard Builder
-
-Build inline or reply keyboards with a fluent API:
+Fluent construction of inline and reply keyboards — full guide in [buttons.md](buttons.md) (incl. file-defined menus via `ButtonManager`/`btn()`):
 
 ```php
 use alirezax5\TelegramBase\App\Button\Keyboard;
 
-// Inline keyboard
+// Inline keyboard — two rows
 $kb = Keyboard::inline()
     ->button('Help', 'btn_help')
     ->button('Settings', 'btn_settings')
-    ->row()
+    ->row()                       // next buttons go on a new row
     ->button('Close', 'btn_close')
     ->toArray();
 
 $Telegram->sendMessage($chatId, 'Choose:', ['reply_markup' => $kb]);
 
-// Reply keyboard
+// Reply keyboard — replaces the user's virtual keyboard
 $reply = Keyboard::reply()
     ->button('Option A')
     ->button('Option B')
-    ->resize()
-    ->oneTime()
+    ->resize()      // fit text
+    ->oneTime()     // hide after first tap
     ->toArray();
 ```
 
+Button labels can come from translation files via the `Button/` definitions (`BUTTONS_DIR`, `BUTTONS_FILE`).
+
 ## Middleware
 
-Pipeline-based middleware, runs before plugins:
+A pipeline that runs **before plugin dispatch** for every update — polling, webhook and queue alike. Register on the `Core` instance before `run()`:
 
 ```php
-// App/Middleware/Middlewares/RateLimitMiddleware.php
-// Built-in: RateLimit, AuditLog, AdminGuard
+$core = new Core();
+$core->middleware()->add(new RateLimitMiddleware(10, 60)); // 10 msgs / 60 s per chat
+$core->middleware()->add(new AdminGuardMiddleware());      // only ADMINS_WHITELIST ids pass
+$core->run();
+```
 
-// Custom middleware:
-namespace alirezax5\TelegramBase\App\Middleware;
+Middlewares execute in registration order (onion model). Each may **pass through** (call `$next()`) or **short-circuit** (return without calling `$next()` — the update is rejected). Class-string registration is supported and instantiated lazily.
 
+| Built-in | Purpose |
+|----------|---------|
+| `RateLimitMiddleware(max, window)` | sliding-window rate limit per chat id |
+| `AdminGuardMiddleware` | restrict updates to `ADMINS_WHITELIST` |
+| `AuditLogMiddleware` | log every update with latency |
+
+Custom middleware:
+
+```php
 class MyMiddleware implements MiddlewareInterface {
-    public function handle(mixed $update, \Closure $next, Telegram $tg): mixed {
+    public function handle(object $update, Telegram $tg, callable $next): mixed {
         // pre-process
-        $result = $next($update);
+        $result = $next();
         // post-process
         return $result;
     }
 }
 ```
 
-### Built-in Middlewares
+## Caching
 
-| Middleware | Purpose |
-|-----------|---------|
-| `RateLimit` | Sliding-window rate limiter per user |
-| `AuditLog` | Logs every incoming update |
-| `AdminGuard` | Restricts to ADMINS_WHITELIST from .env |
+`CacheManager` exposes one API over four drivers (`CACHE_DRIVER`): `array` (per-process), `file`, `redis`, `memcached`. Sessions, plugin discovery metadata, translations and button labels all ride on it — switching the driver changes the persistence story of the whole framework without code changes. Full guide incl. the verified cross-process matrix and per-driver `flush()` reach: [caching.md](caching.md).
 
-## Retry Queue
+## i18n
 
-Automatic retry for failed API calls (429/5xx), with exponential backoff:
+Translation files live in `Language/` (default `fa`). Use the `__()` helper in plugins — full guide in [i18n.md](i18n.md):
 
-```
-attempt 1 → 2s → attempt 2 → 4s → attempt 3 → 8s → drop
+```php
+$Telegram->sendMessage($chatId, __('welcome_message'));
 ```
 
-### Config (.env)
+Language files are PHP arrays (scaffold one with `php bin/tgbase make:language en`). Cached with `LANG_CACHE_TTL`. ⚠️ `LANG_DRIVER` must match your file format (`php` for the shipped files — see [i18n.md](i18n.md)).
 
+## Multi-bot
+
+Run several bots from one process: `BotManager` registry + `BOT_EXTRA_BOTS` env (`name:token` entries) + the library's token stack. Both real-world scenarios (membership check executed by bot #2, delegated send as bot #2) are documented with live evidence in [m[m[multi-bot.md](multi-bot.md).
+
+## Scheduler (cron tasks)
+
+Register tasks in `bin/tasks.php`, run every minute from crontab:
+
+```php
+// bin/tasks.php
+$scheduler->call('prune_old_sessions', '0 3 * * *');   // daily 3am
+$scheduler->call('send_summary',      '*/5 * * * *');  // every 5 min
 ```
-RETRY_QUEUE_DRIVER="json"   # json or redis
-RETRY_MAX_ATTEMPTS=3
-RETRY_BASE_DELAY=2
-RETRY_MAX_SIZE=1000
-```
-
-## Scheduler
-
-Cron-based task scheduler. Each tick runs `bin/scheduler.php` (e.g. every minute via crontab):
 
 ```bash
 * * * * * cd /path/to/project && php bin/scheduler.php
 ```
 
-Schedule tasks in `bin/tasks.php`:
+Tasks are lock-protected (`SCHEDULER_LOCK_*`) so overlapping ticks don't double-run. The same entry drives the `cronjob_*` bot modes: `cronjob_update` does one polling fetch per tick; `cronjob_queue` runs the queue worker for up to `CRON_MAX_TIME` seconds across `CRON_WORKER` file-locked slots.
 
-```php
-$scheduler->call('prune_old_sessions', '0 3 * * *');  // daily at 3am
-$scheduler->call('send_summary',      '*/5 * * * *'); // every 5 min
-```
+## Database & migrations
 
-## Webhook Mode
-
-Switch to `BOT_MODE=webhook_direct` or `webhook_queue` in .env:
-
-```
-BOT_WEBHOOK_URL="https://yourdomain.com/webhook.php"
-BOT_WEBHOOK_SECRET="optional_secret"
-WEBHOOK_CHECK_IP=true   # verify sender IP is Telegram
-```
-
-`webhook.php` is the entry point — it validates IP + secret token, then dispatches.
-
-## Migration
-
-Database schema management via Illuminate Schema builder:
+Optional Eloquent integration (`DATABASE_ENABLE=true` + credentials in `Database/Connections.php`):
 
 ```bash
-# Create a new migration
 php bin/tgbase make:migration create_users_table
 # → Database/Migrations/2026_08_05_203306_create_users_table.php
 
-# Edit the generated file, then run:
-php bin/tgbase migrate
-
-# Check status
-php bin/tgbase migrate:status
-
-# Rollback last batch
-php bin/tgbase migrate:rollback
+php bin/tgbase migrate            # run pending
+php bin/tgbase migrate:status     # what's applied
+php bin/tgbase migrate:rollback   # undo last batch
 ```
 
-Migration file example:
-
 ```php
-<?php
 use alirezax5\TelegramBase\App\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 
@@ -295,79 +1956,544 @@ return new class extends Migration {
             $table->timestamps();
         });
     }
-
     public function down(\Illuminate\Database\Schema\Builder $schema): void {
         $schema->dropIfExists('users');
     }
 };
 ```
 
-### Config (.env)
+Migrate commands never require `BOT_TOKEN` — the validator skips bot-related checks for them (`TGBASE_SKIP_BOT_VALIDATION`).
+
+## CLI commands
+
+```bash
+php bin/tgbase list
+# Scaffolding
+make:plugin <path>          # --type=private|group|both
+make:middleware <name>
+make:session <name>
+make:language <code>
+make:button <code>
+make:migration <name>
+# Database
+migrate / migrate:rollback / migrate:status
+# Diagnostics
+doctor [--telegram]         # local checks; --telegram adds one getMe call
+plugins                     # discovered plugins + handlers
+retry:drain                 # drain due retry-queue items on demand
+```
+
+`doctor` output example:
 
 ```
-DATABASE_ENABLE=true
-DB_DRIVER="mysql"
+PHP                 OK      8.4.24
+Extensions          OK      curl, json, mbstring (optional: pdo_sqlite)
+Configuration       OK      .env readable
+Storage             OK      AppData/ + subdirs writable
+Logs                OK      /path/to/logs
+BOT_TOKEN           OK      format valid
+Telegram API        SKIP    use --telegram to test getMe
+Plugins             OK      2 plugin file(s) discovered
+
+RESULT: OK
+```
+
+Exit code `0` = all checks pass, `1` = at least one failure.
+
+
+======================================================================
+SECTION: DOC: TESTING  (docs/en/testing.md)
+======================================================================
+
+# Testing — the offline suite, live tests and CI
+
+## The offline test suite
+
+The framework ships with a dependency-free test runner (no PHPUnit needed):
+
+```bash
+composer install        # vendor/ must exist (the suite boots the framework)
+php tests/run.php
+```
+
+Structure:
+
+| Directory | What lives there |
+|-----------|------------------|
+| `tests/Unit/` | pure unit tests — env handler, config, queue drivers, offset storage, webhook dispatcher validation, middleware wiring, retry lifecycle, ... (no network) |
+| `tests/Integration/` | multi-component tests (still offline) |
+| `tests/Live/` | **real Telegram API tests — opt-in only** (see below) |
+| `tests/smoke.php` | standalone bootstrap smoke test (bad token, empty token, bad mode, valid boot) |
+| `tests/benchmark.php` | micro-benchmarks for hot paths |
+
+Filter by name:
+
+```bash
+php tests/run.php --filter=Keyboard
+php tests/run.php --filter=Queue
+```
+
+## Known suite drift — RESOLVED
+
+Up to v2.4.0 the offline run reported **196 pass / 18 fail / 12 skip**. The 18 failures (`SessionTest` ×10, `BackwardCompatTest` ×4, `MiddlewareWiringTest` ×4) were pre-existing and had been proven unrelated to the framework fixes by reverting each fix and re-running.
+
+The root cause was found during the pre-release review (P-REL-B05): `tests/run.php` seeds env defaults and calls `Bootstrap::boot()`, but `EnvironmentBootstrap` used Dotenv's `load()`, which **throws when the repo has no `.env`** (a fresh clone only ships `.env.example`). Boot aborted, `Config` stayed uninitialized, and every config-dependent test failed. With the switch to `safeLoad()` the suite runs green in a fresh clone without any setup:
+
+```
+Pass: 224  Fail: 0  Skip: 12
+```
+
+## Live Telegram tests
+
+Live tests hit the real Bot API and are skipped unless explicitly enabled:
+
+```bash
+RUN_TELEGRAM_LIVE_TESTS=1 \
+TELEGRAM_BOT_TOKEN="<your-token>" \
+TELEGRAM_TEST_CHAT_ID="<your-chat-id>" \
+php tests/run.php
+```
+
+House rules (enforced by the tests themselves):
+
+- every message they send is tagged `[telegramBase automated test]`
+- they delete their own messages after verification where possible — and never delete messages they didn't create
+- negative paths included: invalid chat, invalid token, simulated 429
+- the token is read **only** from environment variables
+
+## CI (GitHub Actions)
+
+`.github/workflows/tests.yml` runs on every push/PR across PHP **8.1 – 8.4**: composer validation, `composer audit`, and the offline suite.
+
+`.github/workflows/live-tests.yml` is a **manual** (`workflow_dispatch`) workflow for live tests; it reads the token from the `TGBASE_LIVE_BOT_TOKEN` repository secret and a `chat_id` input — no secrets in the workflow file, and default CI never touches secrets.
+
+## Smoke test
+
+```bash
+php tests/smoke.php
+```
+
+Six cases: bad token / empty token / log-traversal attempt / log absolute path / bad mode / valid boot. Use it after deployments as a 5-second health check.
+
+## What the suite covers (and why it matters for trust)
+
+The reliability claims in [reliability.md](reliability.md) are backed by tests plus crash-tested integration scenarios (SIGKILL at every pipeline stage, real broker redelivery checks, webhook transition tests with `getWebhookInfo` verification). The most relevant suites for auditing those claims:
+
+```bash
+php tests/run.php --filter=Queue      # driver behaviour (json/redis/rabbitmq contracts)
+php tests/run.php --filter=Offset     # offset storage atomicity
+php tests/run.php --filter=Retry      # retry queue lifecycle + retry_after
+php tests/run.php --filter=Webhook    # the 5 webhook validation layers
+php tests/run.php --filter=Security   # env/log hardening rules
+```
+
+The integration harness used during crash-testing (a real bot + scenario scripts) lives in `integration/TestBot/` — see its README for what it does and how to adapt it to your own deployment.
+
+
+======================================================================
+SECTION: DOC: TROUBLESHOOTING  (docs/en/troubleshooting.md)
+======================================================================
+
+# Troubleshooting — symptoms, causes, fixes
+
+## Boot & configuration
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| `BOT_TOKEN is not set or empty` on `migrate:status` | old behaviour | fixed in current version — migrate commands no longer require a token. If you still see it, run with `TGBASE_SKIP_BOT_VALIDATION=1` |
+| `could not find driver` on `migrate` | `DATABASE_ENABLE=true` but no PDO driver/DB configured | set `DATABASE_ENABLE=false` if you don't need a DB, or install the PDO driver |
+| Boot fails with mode-related validation error | `BOT_MODE` misspelled | use exactly one of: `update_direct`, `update_queue`, `webhook_direct`, `webhook_queue`, `cronjob_update`, `cronjob_queue` |
+| Logs appear in CWD instead of `logs/` | old behaviour — relative log path resolved against CWD | fixed: `LogHandler` uses `LoggerConfig::absolutePath()` (project-base-relative). Also affected running `bin/tgbase` from another directory |
+| `Session::regenerate()` fatal: "Cannot modify readonly property" | old behaviour | fixed: `Session` no longer declares `$sessionId` readonly |
+| `tests/smoke.php` fails all negative cases | old broken match logic | fixed in current version |
+| Plugins not loaded | wrong `PLUGINS_DIR`, or plugin cache stale | default is `/Plugin/` (project-base-relative; absolute paths supported). For dev set `PLUGIN_CACHE_ENABLED=false`, then `php bin/tgbase plugins` to verify discovery |
+| Rate limiter / admin guard crash on callback queries | old non-nullsafe `->message->chat->id` access | fixed: nullsafe chains + `edited_message` / `channel_post` / `chat_member` supported |
+
+## Webhook
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| Webhook returns `403` for every delivery | IP whitelist active but a proxy/CDN rewrites the source IP | behind Cloudflare/nginx set `WEBHOOK_CHECK_IP=false` and rely on a strong `BOT_WEBHOOK_SECRET` — see [webhook.md](webhook.md#behind-cloudflare--nginx-proxies-important) |
+| Webhook returns `403`, `getWebhookInfo` says secret mismatch | `BOT_WEBHOOK_SECRET` in `.env` ≠ `secret_token` passed to `setWebhook` | make them identical; rotate with `openssl rand -hex 32` |
+| Webhook returns `500` with "BOT_MODE ... is CLI-only" | CLI-only mode on the web entry (the v2.4.0 SAPI guard) | set `BOT_MODE=webhook_direct` / `webhook_queue` for the web entry, or run the mode from the CLI (`bot.php` / `queue.php`) |
+| `getWebhookInfo`: `last_error_message="Read timeout expired"` | endpoint didn't answer in time (pre-v2.4.0 this could be the infinite-loop bug; post-v2.4.0 it's slow handlers) | upgrade to ≥ v2.4.0; check for slow handlers; move heavy work to `webhook_queue` |
+| `pending_update_count` keeps growing | your endpoint is down/failing continuously | check `last_error_message`, TLS certificate validity, and that `webhook.php` is reachable; a bare GET returning `400 empty` proves the dispatcher is alive |
+| Webhook replies are delayed by seconds | handlers run inline during the HTTP request | switch to `webhook_queue` — the endpoint then answers immediately and workers process asynchronously |
+
+## Queues & workers
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| `RabbitMQ ... "Broken pipe or closed connection"` at connect | old login-method bug (`default` is not a valid AMQP mechanism) | fixed in v2.4.0 (driver now uses `AMQPLAIN`); verify your RabbitMQ user/vhost anyway |
+| Updates pushed but never processed | no consumer running | modes `*_queue` need both sides: producer (`queue.php` or `webhook.php`) **and** consumer (`php bot.php`) |
+| Queue grows unboundedly while workers are down | | set `QUEUE_MAX_SIZE` (bounded queues reject + log when full) |
+| Duplicate processing after a worker crash | expected with at-least-once (RabbitMQ ack-late, webhook/polling redelivery) | make handlers idempotent — see [reliability.md](reliability.md#making-handlers-idempotent-the-practical-90) |
+| Worker exits silently under load | supervisor missing | run all long processes under systemd/supervisord with `Restart=always`; the framework self-restarts polling every `POLLING_RESTART_INTERVAL` batches, the supervisor covers everything else |
+| `409 Conflict` from `getUpdates` | two processes polling the same bot token (or webhook + polling simultaneously) | one update source only: run a single fetcher, and `deleteWebhook` before starting polling |
+
+## Deployment notes worth their weight
+
+- **Log file permissions (FPM):** if the webhook entry can't write logs, it's usually the file owner — PHP-FPM runs as `www-data`/`www`, so log files/dirs must be writable by that user (`chown www-data:www-data logs -R`). A silent no-op log write is hard to notice otherwise.
+- **PHP-FPM `request_terminate_timeout`:** anything your webhook handler does longer than this limit dies with a 502. Keep webhook handling fast; use the queue for the rest.
+- **`php bin/tgbase doctor`** is the fastest triage tool — it checks PHP version/extensions, `.env` readability, `AppData/` writability, log writability, and token format without touching Telegram.
+- **Two update sources fighting:** after switching between polling and webhook, verify the switch completed (`deleteWebhook` or a clean polling stop) before starting the other side. Both running at once = offset conflicts and 409s.
+
+## Diagnostics quick reference
+
+```bash
+php bin/tgbase doctor              # environment triage
+php bin/tgbase plugins             # what the framework actually discovered
+php tests/smoke.php                # 6-case bootstrap check
+php tests/run.php --filter=Queue   # subsystem deep-dive
+curl "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"   # Telegram-side view
+```
+
+
+======================================================================
+SECTION: META: ENV TEMPLATE  (.env.example)
+======================================================================
+
+# ============================================
+# Application
+# ============================================
+APP_DEBUG=false
+DATA_DIR="AppData"
+
+# ============================================
+# Bot
+# ============================================
+BOT_TOKEN=""
+BOT_MODE="update_direct" #update_direct , update_queue,webhook_direct,webhook_queue,cronjob_update,cronjob_queue
+BOT_API_URL="https://api.telegram.org"
+BOT_API_URL_FILE="https://api.telegram.org"
+BOT_WEBHOOK_URL=""
+BOT_WEBHOOK_SECRET=""              # long random string (openssl rand -hex 32).
+                                   # When WEBHOOK_CHECK_IP=false (proxies/CDN), this secret
+                                   # is the only inbound-auth layer — keep it strong.
+WEBHOOK_CHECK_IP=true              # verify sender IP is Telegram (disable behind Cloudflare/proxies)
+
+ALLOWED_UPDATES="all"
+
+# Multiple bots in one process: "name1:token1,name2:token2" (split on the
+# FIRST colon only — tokens themselves contain a colon). "main" is reserved.
+# See docs/multi-bot.md.
+BOT_EXTRA_BOTS=""
+
+# Set to 1 to let DB-only CLI commands (make:migration, plugins:list, …)
+# run without a valid BOT_TOKEN.
+TGBASE_SKIP_BOT_VALIDATION=0
+
+POLLING_LIMIT=100
+POLLING_TIMEOUT=30
+POLLING_STATE_FILE="lastupdate.txt"
+# Self-restart after N batches to keep memory bounded (expects a process
+# supervisor to restart). Set to 0 to disable self-restart.
+POLLING_RESTART_INTERVAL=100
+
+# ============================================
+# CronJob
+# ============================================
+CRON_WORKER=10
+CRON_MAX_TIME=50
+
+# ============================================
+# Plugins
+# ============================================
+PLUGINS_DIR="/Plugin/"
+PLUGIN_CACHE_ENABLED=true
+PLUGIN_CACHE_TTL=300
+PLUGINS_RELOAD_INTERVAL=600
+
+# ============================================
+# Language
+# ============================================
+# LANG_DRIVER must match your translation file format. The shipped files
+# (Language/fa.php, Language/fa/main.php) are PHP arrays → keep "php".
+# With the "json" default and .php files, every lookup silently falls
+# back to the key name (see docs/i18n.md).
+LANG_DRIVER="php"
+DEFAULT_LANG="fa"
+LANG_DIR="/Language"
+LANG_CACHE_TTL=60
+
+# ============================================
+# Buttons
+# ============================================
+BUTTONS_DIR="/Button"
+BUTTONS_FILE="btn.php"
+BUTTONS_CACHE_TTL=60
+BUTTONS_CACHE_ENABLED=true         # false = always re-read definitions from files
+
+# ============================================
+# Queue
+# ============================================
+QUEUE_SAVE_TYPE="json" # json, redis,rabbitmq,memcached
+
+# Bounded queue: when QUEUE_MAX_SIZE is reached (and > 0), new pushes are
+# rejected and logged instead of growing without limit.
+QUEUE_MAX_SIZE=0
+QUEUE_MAX_RETRIES=3
+QUEUE_RETRY_DELAY=2
+
+QUEUE_REDIS_KEY="bot_updates"
+QUEUE_MEMCACHED_KEY="bot_updates"
+RABBITMQ_QUEUE="bot_updates"
+
+# ============================================
+# Cache
+# ============================================
+# Drivers: array | file | redis | memcached.
+# Unavailable drivers (e.g. missing ext-memcached) fall back to array
+# with a logged warning. See docs/caching.md.
+CACHE_DRIVER="array"
+CACHE_PREFIX="tgbase_"
+# Default TTL (seconds) for put()/remember() calls without an explicit TTL.
+CACHE_TTL=300
+
+# File Cache Driver — directory for CACHE_DRIVER="file".
+# Leave empty to use the system temp dir (/tmp/tgbase-cache).
+CACHE_PATH=""
+
+# ============================================
+# Session
+# ============================================
+SESSION_TTL=3600
+SESSION_PREFIX="tgbase:session:"
+
+# ============================================
+# Scheduler
+# ============================================
+SCHEDULER_LOCK_TABLE="task_locks"
+SCHEDULER_LOCK_TTL=300
+# Task file loaded by bin/scheduler.php (absolute or project-relative path).
+SCHEDULE_FILE=""
+
+# ============================================
+# Retry Queue (Error Handler)
+# ============================================
+RETRY_ENABLED=true
+RETRY_QUEUE_DRIVER="json"          # json, redis
+RETRY_MAX_ATTEMPTS=3
+RETRY_BASE_DELAY=2
+RETRY_MAX_SIZE=1000
+RETRY_REDIS_KEY="bot_retry_queue"
+
+# ============================================
+# Database
+# ============================================
+# Set to true only if you have a DB configured (Database/Connections.php).
+# Defaults to false — leave false if you only need the framework without Eloquent.
+DATABASE_ENABLE=false
+
+DB_DRIVER="mysql"                  # any PDO driver (sqlite for local dev)
 DB_HOST="127.0.0.1"
 DB_PORT=3306
 DB_DATABASE=""
 DB_USERNAME=""
 DB_PASSWORD=""
-```
+DB_FILE=""
 
-## Queue Backends
+# ============================================
+# Redis
+# ============================================
+REDIS_HOST="127.0.0.1"
+REDIS_PORT=6379
+REDIS_PASSWORD=""
+REDIS_DATABASE=0                   # logical DB index (cache + connection layer)
+REDIS_TIMEOUT=60
 
-| Driver | Env Setting | Use Case |
-|--------|------------|----------|
-| JSON | `json` | Default, file-based, no dependencies |
-| Redis | `redis` | High throughput, requires `redis` extension |
-| Memcached | `memcached` | Distributed, requires `memcached` |
-| RabbitMQ | `rabbitmq` | Enterprise messaging, requires `amqp` |
+# ============================================
+# RabbitMQ
+# ============================================
+RABBITMQ_HOST="127.0.0.1"
+RABBITMQ_PORT=5672
+RABBITMQ_USER="admin"
+RABBITMQ_PASSWORD=""
+RABBITMQ_VHOST="/"
 
-## Cache Drivers
+# ============================================
+# Memcached
+# ============================================
+MEMCACHED_HOST="127.0.0.1"
+MEMCACHED_PORT=11211
 
-| Driver | Env Setting | Notes |
-|--------|------------|-------|
-| Array | `array` | In-memory, per-process (default) |
-| File | `file` | Persistent, uses CACHE_PATH |
-| Redis | `redis` | Shared, high-performance |
-| Memcached | `memcached` | Distributed cache |
-| Database | `database` | MySQL/MariaDB table-backed |
+MEMCACHED_USERNAME=""
+MEMCACHED_PASSWORD=""
 
-## Configuration
+# ============================================
+# Logging
+# ============================================
+LOG_ENABLED=true
+LOG_DIR="./logs"
+LOG_FILE="log.txt"
+LOG_LEVEL="debug"
 
-All configuration via `.env`. Key groups:
+# ============================================
+# Admins
+# ============================================
+# Comma-separated Telegram user ids for AdminGuardMiddleware.
+ADMINS_WHITELIST=""
 
-| Group | Keys |
-|-------|------|
-| Bot | `BOT_TOKEN`, `BOT_MODE`, `POLLING_*`, `WEBHOOK_*` |
-| Plugins | `PLUGINS_DIR`, `PLUGIN_CACHE_ENABLED`, `PLUGINS_RELOAD_INTERVAL` |
-| Language | `LANG_DRIVER`, `DEFAULT_LANG`, `LANG_DIR` |
-| Buttons | `BUTTONS_DIR`, `BUTTONS_FILE`, `BUTTONS_CACHE_TTL` |
-| Queue | `QUEUE_SAVE_TYPE`, `RETRY_QUEUE_DRIVER`, `RETRY_*` |
-| Cache | `CACHE_DRIVER`, `CACHE_PREFIX`, `CACHE_PATH` |
-| Session | `SESSION_TTL`, `SESSION_PREFIX` |
-| Scheduler | `SCHEDULER_LOCK_TTL`, `SCHEDULER_LOCK_TABLE` |
-| Database | `DATABASE_ENABLE`, `DB_*` |
-| Logging | `LOG_ENABLED`, `LOG_LEVEL`, `LOG_DIR` |
 
-See `.env.example` for full list with defaults.
+======================================================================
+SECTION: META: CHANGELOG (current version)  (CHANGELOG.md)
+======================================================================
 
-## Illuminate Components
+# Changelog
 
-This framework reuses (not forks) these Laravel/Illuminate packages:
+All notable changes to TelegramBase are documented here.
+Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/) (`vMAJOR.MINOR.PATCH` git tags).
 
-| Package | Used for |
-|---------|----------|
-| `illuminate/cache` | Session, plugin cache, language cache, queue locks |
-| `illuminate/database` | Eloquent ORM, Schema builder, migrations |
-| `illuminate/pipeline` | Middleware pipeline |
-| `illuminate/filesystem` | File-based cache, filesystem utilities |
-| `illuminate/support` | Helpers, collections, Carbon, higher-order helpers |
-| `illuminate/contracts` | Interfaces (Cache, Queue, Connection) |
-| `illuminate/redis` | Redis cache/queue driver |
-| `illuminate/events` | Event dispatcher (optional) |
-| `illuminate/bus` | Task dispatch (optional) |
+## [Unreleased]
 
-## License
+Practical cache-layer verification release: the whole caching subsystem (CacheManager, sessions, translations, button definitions) was exercised live against real backends on a production server — one real cache bug and one wiring bug were found, fixed and re-verified.
 
-MIT
+### Added — multilingual documentation
+
+- The complete documentation set (17 documents) now ships in **seven languages** under per-language folders: `docs/en/` (canonical), `docs/fa/`, `docs/zh/`, `docs/ru/`, `docs/fr/`, `docs/pt/`, `docs/ar/` — every folder is a full, self-contained copy of the docs.
+- Language hub added at `docs/README.md`; per-language READMEs (`README.md`, `README.fa.md`, `README.zh.md`, `README.ru.md`, `README.fr.md`, `README.pt.md`, `README.ar.md`) with a language switcher at the top of each.
+- `llms.txt` / `llms-ctx.txt` updated for the new `docs/en/` paths and now mention the available documentation languages.
+
+### Added — Telegram Managed Bots (Bot API 9.6)
+
+- **`managed_bot` updates are no longer silently dropped.** The `PluginHandler` update-type whitelist now includes `managed_bot` (Bot API 9.6, 2026-04-03): a `ManagedBotUpdated` payload dispatches to `onManagedBot($managedBot, $tg)` with the full `before`/`after` chain, so plugins can react to child-bot creation, token and owner changes.
+- **Managed Bots in `BotManager`** — child-bot tokens are fetched live from Telegram and never stored on disk: `registerManagedBot($userId, $name)` (via `getManagedBotToken`), `registerManagedBotFromUpdate($managedBot)` (one call from `onManagedBot`), `refreshManagedBot($userId, $name)` (rotation via `replaceManagedBotToken` — revokes the old token immediately), and `managedBotAccessSettings($userId)`. Failures throw a clean `RuntimeException` carrying the API error text; tokens never reach the logs.
+- **`Keyboard::reply()->requestManagedBot($text, $requestId, $suggestedName, $suggestedUsername)`** builds the Bot API 9.6 `KeyboardButtonRequestManagedBot` (private chats; requires enabling *management of other bots* for the manager bot in the @BotFather Mini App).
+- **docs/en/multi-bot.md** gained two sections: a token-management strategy matrix for *many bots on one file* (static `.env` registry vs dynamic `add()` vs Managed Bots) and the full Managed Bots flow with prerequisites and token-hygiene notes. Verified by the new TM-1 (23/23 PASS) and TM-2 (8/8 PASS) live harness runs — which also caught the stale deployment below.
+
+### Added — webhook multi-bot routing (`secret_token`), live-proven
+
+- New doc sections in `docs/en/multi-bot.md` (+ all 6 translations) covering: the
+  `secret_token` webhook routing pattern (any number of bots from ONE webhook file —
+  bot tokens never appear in URLs; verified live: two real bots, 7/7 deliveries,
+  correct identity every time), where to keep tokens/secrets (`.env` vs encrypted DB
+  registry vs Managed Bots vs HMAC-derived secrets), per-bot data isolation rules
+  (cache/session/offset/queue/files/logs/DB namespaced by bot id), and Managed Bots
+  live notes (BotFather toggle → `can_manage_bots: true`;
+  `KeyboardButtonRequestManagedBot.request_id` must be a Number; child token fetched
+  live via `getManagedBotToken`).
+- Token transmission facts documented from live evidence: the Bot API token is read
+  ONLY from the URL path `/bot<token>/METHOD` — headers, query string and JSON body
+  are never consulted (8/8 probe suite); Telegram→bot webhooks carry only
+  `X-Telegram-Bot-Api-Secret-Token` (the secret set in `setWebhook`), never the bot
+  token.
+
+### Added — guest mode dispatch (Bot API 10.0)
+
+- `guest_message` added to the `PluginHandler` update-type whitelist: a guest query
+  now dispatches to `onGuestMessage($message, $tg)` (previously silently dropped).
+  Proven with a synthetic update (before → dropped, after → hook fired) and
+  regression-checked against `managed_bot` dispatch.
+
+### Fixed — deployment
+
+- The production runtime of the test bot was still running a **stale `App/` tree** missing seven release files: P-REL-B01 (`BOT_EXTRA_BOTS` from `.env`), P-REL-B05 (`safeLoad`), P-REL-B06 (`Config` guards), P3.3.1-F006 (RabbitMQ ack-late + worker ack-after-process) and P3.3.1-F008 (webhook SAPI guard) among them. The live TM-1 run failed exactly the checks those fixes cover — extra bots defined in `.env` were never registered (raw `getenv()` path). After backing up and syncing the seven files, the full suite passes 23/23. If you deploy by hand, diff your runtime `App/` against the release tree before shipping.
+
+### Fixed — pre-release deep review (P-REL)
+
+- **Multi-bot registration ignored `.env` (MEDIUM).** `BotManager` read `BOT_EXTRA_BOTS` with raw `getenv()`, which never sees values defined in `.env` (Dotenv `createImmutable` does not call `putenv`) — yet the docs recommend configuring it in `.env`. Extra bots defined there were silently never registered. `bot()` now reads through `EnvHandler` (`$_ENV` first, real environment second) — both sources work (P-REL-B01). The scheduler's `SCHEDULE_FILE` had the same defect and is fixed the same way (P-REL-B02).
+- **Boot crashed without a `.env` file (MEDIUM).** `EnvironmentBootstrap` called Dotenv's `load()`, which *throws* when no `.env` exists — deployments configured exclusively through real environment variables (systemd `Environment=`, `docker -e`, Kubernetes) died at boot with `Unable to read any of the environment file(s)`. Now uses `safeLoad()`: `.env` loads when present, is optional when absent (P-REL-B05). This was also the root cause of the 18 pre-existing test-suite failures (`SessionTest` ×10, `BackwardCompatTest` ×4, `MiddlewareWiringTest` ×4 — the boot aborted before `Config` was initialized); the offline suite now reports **224 pass / 0 fail / 12 skip** in a fresh clone.
+- **`Config` accessors hid the real error (LOW).** Calling `Config::bot()` etc. before a failed/incomplete boot produced `Attempt to read property on null` warnings followed by a bare `TypeError`. Accessors now fail fast with a readable `RuntimeException` pointing at the boot problem (P-REL-B06).
+- **`DB_DRIVER` was documented but not honored (LOW).** `Database/Connections.php` hardcoded `driver: mysql` while `docs/configuration.md` promised "any PDO driver (sqlite for local dev)". The driver is now read from `DB_DRIVER` (default `mysql` — existing deployments unaffected) (P-REL-B03).
+- **Framework pinned a buggy library version (MEDIUM).** `composer.json`/`composer.lock` constrained `alirezax5/telegram-bot-php` to `^3.0` / `3.0.0` — every fresh install got the release with the broken `getChatMember()` (fatal), incomplete `prepareBotData()` JSON encoding, stray `null` parameters and the cURL timeout leak. The constraint is now `^3.3` with the lock pointing at 3.3.0 (the release containing all fixes) (P-REL-B04).
+- **Documentation drift (LOW).** `docs/features.md` had a malformed `[multi-bot.md]` link; `docs/configuration.md` still listed the nonexistent `database` cache driver, claimed the wrong `LANG_DRIVER` default (`php` → actually `json`, `.env.example` correctly sets `php`), and omitted `BOT_EXTRA_BOTS`, `BUTTONS_CACHE_ENABLED`, `CACHE_TTL`, `SCHEDULE_FILE` and the env-only deployment mode; four CHANGELOG doc links missed the `docs/` prefix; `.env.example` carried stale keys for removed drivers (`apc`, `database` cache, unused Redis client knobs) and was missing seven keys the code actually reads. All corrected (P-REL-D01…D05).
+
+### Fixed
+
+- **Redis cache `flush()` could silently delete nothing (MEDIUM).** `CacheRedisStore::flush()` iterated `SCAN` with `while ($keys = $redis->scan(...))` — on a shared/large keyspace, `SCAN ... MATCH <prefix>*` routinely returns *empty but non-terminal* pages (the cursor advances past non-matching keys), and an empty array terminated the loop after the first page. Result: matching keys were left behind while `flush()` returned `true`. Discovered live: 11 `tgbase_*` keys survived a "successful" flush on a Redis shared with WordPress object caches. The loop now continues while the SCAN cursor is non-zero (P-CACHE-F001); re-verified — `flush()` removes every prefixed key, other applications' keys untouched.
+- **`BUTTONS_CACHE_ENABLED=false` was ignored (LOW).** `ButtonConfig` read the flag into config, but `ButtonManager` never consulted it — the button-definition cache was always on. Now the flag genuinely disables caching (definitions re-read from files per use). Verified live in both states: `flag=false → cached=false`, `flag=true → cached=true` (P-CACHE-F002).
+
+### Added
+
+- **Dedicated docs for the four toolbox features**: [docs/caching.md](docs/en/caching.md) (drivers, config, TTL semantics verified with real waits, per-driver `flush()` reach, key layout, fallback chain), [docs/sessions.md](docs/en/sessions.md), [docs/i18n.md](docs/en/i18n.md) (incl. the `LANG_DRIVER` format-mismatch pitfall), [docs/buttons.md](docs/en/buttons.md). All cross-linked from [docs/features.md](docs/en/features.md) and the README docs index.
+
+### Verified — practical cache test suite (P-CACHE)
+
+Ran against real backends on the production server (Redis with `requirepass`, shared with other apps; memcached; plain disk):
+
+- 17-check in-process suite per driver (`array`, `file`, `memcached`, `redis`): scalar/array/bool/Unicode round-trips, `has`/`get`-default, real-TTL expiry (2 s wait), `remember` executing once, counters, `forget`, tags-fallback API, prefix-scoped `flush`, idempotent re-init — **all PASS**.
+- Graceful degradation: requesting `memcached` on a PHP without the extension falls back to `array` with a warning (documented chain) — **PASS**.
+- Cross-process persistence matrix (write in process A → verify in fresh process B): scalar, nested array, counter 5→6, `remember` returning the *planted* value, session id + payload continuity, `lang:fa` translation payload, `buttons:all` definitions — **9/9 PASS on `file`, `redis`, `memcached`**; on `array` process B misses exactly as documented.
+- Backend-level inspection: redis keys with live TTL countdowns (297 s of 300 s, 3597 s of 3600 s session, 57 s of 60 s lang cache); memcached raw keys under `tgbase_:`; file store with visible expiry stamps.
+- Real pipeline end-to-end: `/cache demo hello` dispatched through `Processor` + `CacheTestPlugin` → value persisted; `/cache demo` in a fresh process → `demo = hello`; same for `/session-set`/`/session-get` — **PASS**.
+
+## [v2.4.0] — 2026-10-11
+
+Reliability release: five framework defects fixed (including two HIGH-severity data-loss/availability bugs found and reproduced during end-to-end crash testing), a new offline test suite + CI, and a documentation overhaul.
+
+### Fixed — framework
+
+- **RabbitMQ queue: worker crash no longer loses the job (HIGH).** `RabbitQueue::pop()` acknowledged messages *before* they were processed, so killing a worker mid-processing permanently destroyed the in-flight job (at-most-once). The driver now holds the delivery tag and acknowledges **after** processing — a crash makes the broker redeliver the message (**at-least-once**). Corrupted payloads are still acked-and-discarded immediately so they can't poison the queue. Re-verified end-to-end with real SIGKILLs: post-fix, an in-flight job is redelivered to the next worker.
+- **Webhook entry no longer hangs the web worker on CLI-only modes (HIGH).** `Core::run()` only routed `webhook_direct` to the webhook dispatcher; every other `BOT_MODE` fell through to the CLI switch — so pointing Telegram's webhook at a bot configured e.g. `update_direct` silently started an **infinite `getUpdates` loop inside the PHP-FPM worker** (Telegram: `Read timeout expired` → endless retries; FPM: worker killed at `request_terminate_timeout` → 502). A SAPI-aware guard now routes the HTTP path explicitly (see *Added*), and CLI-only modes fail fast with HTTP 500 + an explanatory message instead of hanging.
+- **Photo (and all list-shaped) data destroyed in queue/webhook paths (HIGH).** `Processor::toObject()` converted *every* array to an object recursively, destroying list-shaped fields — `photo` sizes, message `entities`, `new_chat_members`, `inline_keyboard` rows — for updates arriving via queue drivers or webhook JSON. List arrays are now preserved as arrays (shape-preserving normalization); verified with a real photo end-to-end through the full pipeline.
+- **RabbitMQ driver could never connect with default settings (HIGH).** `ConnectionManager` passed `'default'` as the AMQP login mechanism — not a valid value (RabbitMQ supports `AMQPLAIN`/`PLAIN`), so the handshake was rejected and the socket died (`Broken pipe or closed connection`), making the whole driver unusable. Now uses `AMQPLAIN` (library default).
+- **Queue push broken in polling→queue modes (HIGH).** `QueueManager::push()` type-errored when the polling fetcher handed it Telegram SDK update *objects* (JSON/Redis drivers contract plain arrays). Objects are now normalized to arrays once, at the `push()` choke point.
+- **Absolute `PLUGINS_DIR` doubled into a nonexistent path (MEDIUM).** `PluginConfig::fromEnv()` always prepended the project base, turning an absolute `PLUGINS_DIR` into `/project//absolute/path`. Absolute paths are now used as-is (also enables multi-bot deployments from one codebase).
+- **Middleware crash on callback queries.** `RateLimitMiddleware` and `AdminGuardMiddleware` used non-nullsafe access (`$update->message->chat->id`) and crashed on updates without a message. Now nullsafe across `message`, `edited_message`, `channel_post`, `callback_query` and `chat_member`.
+- **Logs written to the wrong directory.** `LogHandler` resolved `LOG_DIR` against the CWD, so `bin/tgbase` from another directory scattered logs around; also crashed when config wasn't booted. Now resolves against the project base and is a no-op without config.
+- **`Session::regenerate()` fatal** ("Cannot modify readonly property") — session identifiers are no longer readonly.
+- **`Keyboard::row()` on an empty builder** created rows at a wrong index — first-row edge case fixed.
+- **Retry queue ignored Telegram's `retry_after`** — it now honors the server-provided delay exactly when present, falling back to exponential backoff.
+- **Webhook payload validation refactored** for testability (`dispatchIntoResponse()` returns a DTO; `dispatch()` stays the thin HTTP wrapper) and uses the shared queue bootstrap instead of re-reading config per request.
+- **CLI**: `doctor` and `plugins` commands added; `Maker` normalizes plugin paths to PSR-4 (`users/register` → `Plugin\Users\Register`); `migrate` commands boot without `BOT_TOKEN`/`BOT_MODE`; `DatabaseConfig` properly gated behind `DATABASE_ENABLE`.
+
+### Added
+
+- **`QueueManager::ack()` / `RabbitQueue::ack()`** — post-processing acknowledgement API backing the at-least-once RabbitMQ semantics. Drivers without broker-side acks treat it as a no-op.
+- **`Core::isHttpSapi()`** (public, static, testable) + HTTP-mode routing in `Core::run()`: `webhook_queue` → validate + enqueue + 200; `update_direct` → process inline + warning; everything else → HTTP 500 fail-fast with guidance.
+- **Offline test suite** (`tests/run.php` — 25 files across Unit/Integration, dependency-free runner with `--filter`), standalone smoke test (`tests/smoke.php`), benchmarks, and opt-in **live Telegram tests** (`tests/Live/`, env-gated, self-cleaning, tagged messages).
+- **GitHub Actions CI** — `tests.yml` (PHP 8.1–8.4 matrix: composer validate/audit + offline suite) and manual `live-tests.yml` (token via repository secret only). The `branches:` trigger syntax (previously malformed) is fixed.
+- **Documentation restructured** — the monolithic README became a short intro + index; full guides now live in `docs/` (overview, architecture, getting-started, bot-modes, plugins, queue-pipeline, webhook, reliability, configuration, features, testing, troubleshooting).
+- **`docs/reliability.md`** — the delivery-guarantee matrix and crash-test findings (SIGKILL at every pipeline stage) distilled into operator guidance, including idempotency recipes.
+- **`llms.txt` / `llms-ctx.txt`** regenerated to match the new docs layout (LLM-oriented index + single-file context).
+- **`.env.example`** — added missing queue keys (`QUEUE_MAX_SIZE`, `QUEUE_MAX_RETRIES`, `QUEUE_RETRY_DELAY`), corrected cache prefix, and documented webhook-secret strength guidance (32+ hex chars; it's the only inbound-auth layer when `WEBHOOK_CHECK_IP=false`).
+- **`examples/HelloBot.php`** — complete example plugin (commands, inline keyboard, sessions, `tg_retryable`, callbacks).
+- **`integration/TestBot/`** — real-bot integration harness (own plugins/middleware directory, runtime isolation) used to validate the framework against live Telegram traffic; shipped trimmed of session-specific scaffolding.
+
+### Changed
+
+- `webhook.php` / polling entry points are now dependency-free (they no longer wire the TestBot's logging middleware; TestBot remains a standalone opt-in harness).
+- README rewritten around the questions a newcomer actually has (what is this, why does it exist, how do updates flow) with the `docs/` index as the entry point.
+- Cache prefix default corrected from `balebase_` to `tgbase_` (leftover from the project this was forked from).
+
+### Removed
+
+- Session-specific test scaffolding: root-level debug drivers (`crash_test.php`, `debug_poll.php`, `restart_test.php`, `bot_polling.php`) and the crash/dispatch-debug plugins + scripts inside the TestBot harness. The permanent test coverage lives in `tests/` and CI.
+
+### Verified — cron modes exercised live (P331-CRON)
+
+Both cron modes were tested end-to-end with real crontab fires and real messages:
+
+- `cronjob_queue` — a real message was fetched, pushed to RabbitMQ and processed
+  inside the 50 s batch window (`Limited worker finished: 1 updates`), then the
+  queue drained back to 0/0; the slot mutex proven (a second fire exits in ~33 ms
+  while a worker holds the slot).
+- `cronjob_update` — the first tick starts a self-healing daemon that survives
+  minute boundaries and processes messages inline; on SIGTERM it shuts down
+  gracefully within one long-poll cycle (~12 s), releases the slot, and the next
+  tick restarts it. Cron acts as the supervisor; later ticks busy-exit in
+  milliseconds — that is normal, not an error.
+- Documented from live evidence in `docs/en/bot-modes.md`.
+
+### Verified — multi-bot exercised live (P-MB)
+
+- `/multibot` harness run with two real bots (`@emojiCustom_bot`, `@instaroonxbot`):
+  identity ✔, isolation ✔, cross-send ✔ (239 ms), membership via bot #2 ✔ (13 ms),
+  token stack ✔ — **5/5 PASS in 393 ms** (evidence: `runtime/p331/multibot.log`).
+- Library upgraded 3.0.0 → 3.2.1 with three defect fixes overlaid (`callRaw()`
+  availability, JSON parameter encoding, import fix), enabling the multi-bot
+  scenarios above.
+
+### Known issues (open, tracked)
+
+- **F004 (MEDIUM, suite):** 18 pre-existing offline-suite failures (`SessionTest` ×10, `BackwardCompatTest` ×4, `MiddlewareWiringTest` ×4) — proven unrelated to the v2.4.0 fixes by A/B reversion runs; subsystem suites for queue/offset/retry/webhook are green. Under investigation.
+- **Logger under FPM (observation):** framework logs can be sparse for webhook requests handled by PHP-FPM short-lived workers (CLI behaviour unaffected). Harness/echo-level evidence is reliable; treat framework logs as best-effort on the webhook path.
+- **Security tip:** set `BOT_WEBHOOK_SECRET` to 32+ random hex characters — when `WEBHOOK_CHECK_IP=false` (Cloudflare/proxies), the secret is the only inbound authentication of the webhook endpoint.
+
+## [v2.3.0] — 2026-08-05
+
+Previous tagged release. See the git history for changes prior to this changelog's introduction.
+
+[v2.4.0]: https://github.com/alirezax5/telegramBase/compare/v2.3.0...v2.4.0
+[v2.3.0]: https://github.com/alirezax5/telegramBase/releases/tag/v2.3.0
+

@@ -41,7 +41,13 @@ final class BotConfig
 
     private function validate(): void
     {
-        if ($this->token === '') {
+        // When CLI tooling sets TGBASE_SKIP_BOT_VALIDATION=1, the BOT_TOKEN
+        // is allowed to be empty (e.g. running migrate:status without
+        // configuring a real bot). Other invariants (mode, polling ranges)
+        // are still enforced when those values are non-empty.
+        $skipBot = EnvHandler::bool('TGBASE_SKIP_BOT_VALIDATION', false);
+
+        if (!$skipBot && $this->token === '') {
             throw new \InvalidArgumentException('BOT_TOKEN cannot be empty');
         }
 
@@ -51,7 +57,7 @@ final class BotConfig
             'cronjob_update', 'cronjob_queue',
         ];
 
-        if (!in_array($this->mode, $validModes, true)) {
+        if ($this->mode !== '' && !in_array($this->mode, $validModes, true)) {
             throw new \InvalidArgumentException(
                 "BOT_MODE not supported: {$this->mode}. Valid modes: " . implode(', ', $validModes)
             );

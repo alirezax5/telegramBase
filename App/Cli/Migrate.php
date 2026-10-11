@@ -7,9 +7,14 @@ namespace alirezax5\TelegramBase\Cli;
 use alirezax5\TelegramBase\App\Bootstrap\Bootstrap;
 use alirezax5\TelegramBase\App\Config\Config;
 use alirezax5\TelegramBase\App\Database\MigrationRunner;
+use alirezax5\TelegramBase\App\Environment\EnvHandler;
 
 /**
  * CLI wrappers for the migration runner.
+ *
+ * The migrate commands only need the database connection; they must not
+ * require BOT_TOKEN or BOT_MODE (the validator skips those when
+ * TGBASE_SKIP_BOT_VALIDATION is set, which Migrate::boot() sets for them).
  */
 final class Migrate
 {
@@ -18,6 +23,13 @@ final class Migrate
      */
     private static function boot(): MigrationRunner
     {
+        // Tell EnvironmentValidator that migration tooling does not need
+        // a live bot token / mode. The validator is invoked by Bootstrap::boot()
+        // and respects this opt-out.
+        EnvHandler::clearCache();
+        putenv('TGBASE_SKIP_BOT_VALIDATION=1');
+        $_ENV['TGBASE_SKIP_BOT_VALIDATION'] = '1';
+
         Bootstrap::boot();
 
         if (!Config::database()->enable) {

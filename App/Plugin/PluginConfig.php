@@ -19,12 +19,23 @@ final  class PluginConfig
     public static function fromEnv(): self
     {
         $dir = EnvHandler::get('PLUGINS_DIR', '/Plugin/');
-        $dir = Paths::base() . $dir;
+
+        // If PLUGINS_DIR is an absolute path, use it directly — don't
+        // prepend the project base (which would produce a doubled path
+        // like /home/user/repo/home/user/repo/Plugin). Otherwise, join
+        // the relative path against the project base.
+        if (str_starts_with($dir, '/') || preg_match('#^[A-Za-z]:[\\\\/]#', $dir)) {
+            // Absolute path — use as-is, just normalize trailing slash.
+            $dir = rtrim($dir, '/\\');
+        } else {
+            // Relative path — join against project base.
+            $dir = rtrim(Paths::base(), '/') . '/' . ltrim($dir, '/');
+        }
 
         return new self(
             path: $dir,
-            reloadInterval: (int) EnvHandler::get('PLUGINS_RELOAD_INTERVAL', 600),
-            cacheEnabled: (bool) EnvHandler::get('PLUGIN_CACHE_ENABLED', true),
+            reloadInterval: EnvHandler::int('PLUGINS_RELOAD_INTERVAL', 600),
+            cacheEnabled: EnvHandler::bool('PLUGIN_CACHE_ENABLED', true),
             autoReload: true,
         );
     }

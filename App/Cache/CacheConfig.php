@@ -28,8 +28,8 @@ final class CacheConfig
             database: EnvHandler::int('REDIS_DATABASE', 0),
             password: EnvHandler::string('REDIS_PASSWORD', ''),
             driver: EnvHandler::string('CACHE_DRIVER', 'array'),
-            prefix: EnvHandler::string('CACHE_PREFIX', 'balebase_'),
-            path: rtrim(EnvHandler::string('CACHE_PATH', sys_get_temp_dir() . '/balebase-cache'), '/\\'),
+            prefix: EnvHandler::string('CACHE_PREFIX', 'tgbase_'),
+            path: rtrim(EnvHandler::string('CACHE_PATH', sys_get_temp_dir() . '/tgbase-cache'), '/\\'),
             ttl: EnvHandler::int('CACHE_TTL', 3600),
         );
     }

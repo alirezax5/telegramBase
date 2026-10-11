@@ -167,7 +167,13 @@ final class ConnectionManager
                 $cfg->password,
                 $cfg->vhost,
                 false,       // insist
-                'default',   // login_method
+                // P3.3.1-F005 fix: 'default' is not a valid AMQP login
+                // mechanism (RabbitMQ supports AMQPLAIN/PLAIN); the server
+                // rejects the handshake and the socket dies with
+                // "Broken pipe or closed connection", making the RabbitMQ
+                // queue driver permanently unusable. AMQPLAIN is the
+                // library default and is verified working (probe V2).
+                'AMQPLAIN',  // login_method
                 null,        // login_response
                 'en_US',     // locale
                 3.0,         // connection_timeout

@@ -21,6 +21,19 @@ class PluginHandler
         'shipping_query', 'pre_checkout_query', 'purchased_paid_media',
         'poll', 'poll_answer', 'my_chat_member', 'chat_member',
         'chat_join_request', 'chat_boost', 'removed_chat_boost',
+        // Bot API 9.6 (2026-04-03) — Managed Bots: fired when a child bot is
+        // created for (or its token/owner changes under) this manager bot.
+        // Plugins implement onManagedBot($managedBot, $tg); payload is the
+        // ManagedBotUpdated object {user, bot}.
+        'managed_bot',
+        // Bot API 10.0 (2026-05-08) — Guest Mode: fired when a user invokes
+        // the bot in a chat it is NOT a member of (requires
+        // supports_guest_queries=true from BotFather). Plugins implement
+        // onGuestMessage($message, $tg); payload is a Message carrying
+        // guest_query_id + guest_bot_caller_user/guest_bot_caller_chat.
+        // Answer with $tg->bot('answerGuestQuery', ['guest_query_id' => ...,
+        // 'result' => InlineQueryResult]) — same result shapes as inline mode.
+        'guest_message',
     ];
 
     private const CACHE_KEY_PLUGINS = 'plugin_handler:plugins_index';
@@ -288,7 +301,11 @@ class PluginHandler
 
         $method = 'on' . str_replace(' ', '', ucwords(str_replace('_', ' ', $type)));
 
-        $chatType = $Telegram->chatType();
+        // chatType() may return null for updates without a chat (e.g.
+        // poll, poll_answer). Treat null as "unknown chat type" —
+        // plugins without a ChatType attribute still run; plugins
+        // restricted to a specific type are skipped.
+        $chatType = $Telegram->chatType() ?? '';
 
         $this->run('before', $update->$type ?? null, $Telegram, $chatType);
         $this->run($method, $update->$type ?? null, $Telegram, $chatType);
@@ -304,7 +321,6 @@ class PluginHandler
         }
         return null;
     }
-
     /**
      * Run a plugin hook (before / on{Type} / after) for every registered plugin.
      *

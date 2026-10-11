@@ -16,9 +16,25 @@ class PollingLoop
     public function __construct(
         private Fetcher   $fetcher,
         private Processor $processor,
-        private int       $cleanupInterval = 100
+        private int       $cleanupInterval = 0
     )
     {
+        // Default: self-restart every 100 batches to keep memory bounded
+        // on long-running workers. This expects a process supervisor
+        // (systemd / supervisord / Docker restart:always) to restart
+        // the process after exit.
+        //
+        // Set POLLING_RESTART_INTERVAL=0 in .env to disable self-restart
+        // (use only when memory growth is confirmed to be zero and no
+        // supervisor is in place — not recommended for production).
+        if ($this->cleanupInterval === 0) {
+            $this->cleanupInterval = (int)(
+                \alirezax5\TelegramBase\App\Environment\EnvHandler::get(
+                    'POLLING_RESTART_INTERVAL',
+                    100
+                )
+            );
+        }
     }
 
     public function start(): void
@@ -75,13 +91,22 @@ class PollingLoop
     }
 
     /**
-     * Periodic maintenance: force GC + filesystem stat cache purge.
+     * Periodic maintenance: drain retry queue, force GC + filesystem
+     * stat cache purge, flush per-request shared state.
      *
      * Shared plugin state and missing-language-key queues are flushed so
      * long-running loops do not accumulate memory.
      */
     private function maintenance(): void
     {
+        // Drain any due retry items on every maintenance tick so the
+        // retry queue is not write-only (Phase 2 G2 fix).
+        try {
+            $this->processor->processRetries();
+        } catch (\Throwable $e) {
+            LogHandler::warning('Retry drain error: ' . $e->getMessage());
+        }
+
         if ($this->processedCount % 50 === 0) {
             gc_collect_cycles();
             clearstatcache();
@@ -89,7 +114,11 @@ class PollingLoop
             Language::getInstance()->flushMissingKeys();
         }
 
-        if ($this->processedCount >= $this->cleanupInterval) {
+        // Self-restart: when processedCount reaches cleanupInterval, exit
+        // so a process supervisor can restart us with fresh memory. Set
+        // POLLING_RESTART_INTERVAL=0 to disable (not recommended unless
+        // you've confirmed zero memory growth and have no supervisor).
+        if ($this->cleanupInterval > 0 && $this->processedCount >= $this->cleanupInterval) {
             LogHandler::info('Restart cycle reached');
             $this->shouldStop = true;
         }
