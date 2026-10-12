@@ -4,33 +4,31 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "98ef94b646d27016705eaccc901f2e56",
+    "content-hash": "8c79215a620d2bb94230bfb6598ce3f6",
     "packages": [
         {
             "name": "alirezax5/telegram-bot-php",
-            "version": "3.3.0",
+            "version": "3.4.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/alirezax5/telegramBotPhp.git",
-                "reference": "5e5ae29204faca272898a84254bc3095299baba1"
+                "reference": "0ef534d32b44c9cdc7561bc4f21fefa5e8d8c9cd"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/alirezax5/telegramBotPhp/zipball/3.3.0",
-                "reference": "3.3.0"
+                "url": "https://api.github.com/repos/alirezax5/telegramBotPhp/zipball/0ef534d32b44c9cdc7561bc4f21fefa5e8d8c9cd",
+                "reference": "0ef534d32b44c9cdc7561bc4f21fefa5e8d8c9cd",
+                "shasum": ""
             },
             "require": {
                 "ext-curl": "*",
                 "ext-json": "*",
-                "php": ">=7.0"
+                "php": ">=8.1"
             },
             "type": "library",
             "autoload": {
                 "psr-4": {
-                    "telegramBotApiPhp\\": "src/",
-                    "telegramBotApiPhp\\Types\\": "src/Types",
-                    "telegramBotApiPhp\\Traits\\": "src/Traits",
-                    "telegramBotApiPhp\\Factory\\": "src/Factory"
+                    "telegramBotApiPhp\\": "src/"
                 }
             },
             "notification-url": "https://packagist.org/downloads/",
@@ -44,6 +42,7 @@
                     "role": "Developer"
                 }
             ],
+            "description": "A lightweight PHP wrapper for the Telegram Bot API",
             "homepage": "https://github.com/alirezax5/telegramBotPhp",
             "keywords": [
                 "bot",
@@ -55,10 +54,9 @@
             ],
             "support": {
                 "issues": "https://github.com/alirezax5/telegramBotPhp/issues",
-                "source": "https://github.com/alirezax5/telegramBotPhp/tree/3.0.0"
+                "source": "https://github.com/alirezax5/telegramBotPhp/tree/3.4.0"
             },
-            "time": "2026-06-08T19:22:17+00:00",
-            "version_normalized": "3.3.0.0"
+            "time": "2026-10-12T15:16:57+00:00"
         },
         {
             "name": "brick/math",
