@@ -104,6 +104,39 @@ Compiled definitions are cached under the key `buttons:all` with `BUTTONS_CACHE_
 
 Cache key / reach follow [caching.md](caching.md): on `array` the cache is per-process; on `file`/`redis`/`memcached` the definitions are shared across workers.
 
+## Editing a message without losing its inline keyboard
+
+`editMessageText()` **replaces the whole message**, not just the text: called without `reply_markup`, any inline keyboard the message had is gone. When the edited message must keep its buttons, capture the original markup and pass it straight through:
+
+```php
+$markup = $msg->reply_markup ?? null;   // from the update's message object
+
+$tg->editMessageText($chatId, $msgId, $newText, $markup !== null
+    ? ['reply_markup' => $markup]
+    : []);
+```
+
+The same rule applies to media edits (`editMessageCaption`, `editMessageMedia`) and to relay/mirror flows that copy one chat's messages into another: keep the copy's markup (e.g. alongside the source/copy message ids in your own table) and hand it back on every edit, or the mirrored message silently loses its buttons after the first edit. (Verified live in a user↔admin support relay, 2026-10-12: without the pass-through, the info keyboard on the group copy vanished on the first text edit.) For media messages that Telegram refuses to text-edit (sticker, video note, voice), `editMessageReplyMarkup($chatId, $msgId, ...)` is the graceful fallback.
+
+## UX convention: every input state shows its exit
+
+Any state that waits for free text — search box, broadcast payload, a value to ban/unban, an answer to forward — must render a Reply Keyboard with **visible exit buttons** (e.g. `↩️ بازگشت` / `↩️ Back`, `❌ لغو` / `❌ Cancel`) and its text handler must recognize those labels before treating the input as data. A text-only cancel command (`/cancel`) is not a substitute: it is undiscoverable. Observed live (2026-10-12): an admin tapped *Block*, got a bare "send the user id" prompt with the old panel keyboard still on screen and no visible way out — and had to escape via the main-menu button. Pair the buttons with a fresh prompt message (so the keyboard swap is visible), and when a flow abandons or reshapes a keyboard, follow the keyboard-cycle rule: send a fresh markup or `remove_keyboard` instead of leaving a stale one (see [conversations.md](conversations.md)).
+
 ## Test commands (integration/TestBot)
 
 `/btn` (if present in your plugin set) — the shipped `StartPlugin` shows `btn('start')` in action; the P-CACHE suite verified `btn('start')` resolves (`rows=1`) and its payload persists cross-process under `buttons:all`.
+
+
+## Request-shaped payloads + Mini App button (2026-10)
+
+```php
+Keyboard::remove();                    // ['remove_keyboard' => true] (+selective)
+Keyboard::forceReply(false, 'جواب…');  // ['force_reply' => true, 'input_field_placeholder' => …]
+Keyboard::reply()->webApp('فروشگاه', 'https://shop.example.com');  // KeyboardButtonWebApp
+```
+
+`remove()` is the TM-25 hygiene primitive: attach it (json_encoded) to the
+next message whenever a custom keyboard must disappear — abandoned flow,
+closed panel. `webApp()` opens a Telegram Mini App (reply keyboards in
+private chats, inline keyboards anywhere); the app receives
+`WebApp.initData` which must be validated server-side.

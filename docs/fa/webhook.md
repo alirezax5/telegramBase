@@ -88,3 +88,18 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=...&secret_token=...&al
 4. بعد از یک پیام تستی، `getWebhookInfo` تمیز باشد و اثر جانبی پلاگین شما قابل مشاهده باشد.
 
 </div>
+
+
+## مدیریت وب‌هوک از CLI (۲۰۲۶-۱۰)
+
+```bash
+php bin/tgbase webhook:info                       # url، allowed_updates، pending، last_error
+php bin/tgbase webhook:set --url=https://host/webhook.php
+php bin/tgbase webhook:del [--drop-pending]
+```
+
+`webhook:set` مقدار `secret_token` را از `BOT_WEBHOOK_SECRET` برمی‌دارد و
+لیست پیش‌فرض توصیه‌شدهٔ `allowed_updates` را می‌گذارد —
+`message,edited_message,callback_query,my_chat_member,chat_member` — پس
+هوک‌های `onEditedMessage()` از همان ابتدا ویرایش‌ها را می‌گیرند.
+`webhook:info` وقتی وب‌هوک فعالِ `edited_message` را ندارد صریحاً هشدار می‌دهد.

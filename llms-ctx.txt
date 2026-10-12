@@ -89,6 +89,7 @@ Everything lives in `docs/` — start with the overview:
 | [docs/features.md](docs/en/features.md) | Sessions, keyboards, middleware, cache, i18n, scheduler, database |
 | [docs/caching.md](docs/en/caching.md) | CacheManager deep dive: drivers, TTLs, flush reach, cross-process matrix (live-verified) |
 | [docs/sessions.md](docs/en/sessions.md) | Per-chat session state: API, multi-step flows, security notes |
+| [docs/conversations.md](docs/en/conversations.md) | Multi-step conversation flows: declarative steps, validation/retry, branching, back/menu nav, inline + Reply Keyboard, timeout |
 | [docs/i18n.md](docs/en/i18n.md) | Translations: file layout, `__()` helper, per-user language, caching |
 | [docs/buttons.md](docs/en/buttons.md) | Keyboard builder + file-defined menus (`btn()`), callback handling |
 | [docs/multi-bot.md](docs/en/multi-bot.md) | Multiple bots in one process: `BotManager`, `BOT_EXTRA_BOTS`, token stack (live-verified) |
@@ -805,6 +806,28 @@ The webhook front-controller resolves `secret → bot` first, then boots the
 framework with that bot's token and namespace — every later read/write then
 stays inside the bot's own sandbox automatically.
 
+### Cloning a deployment? Clone the database too
+
+The namespacing above protects **one process serving many bots**. A different
+trap is **two separate deployments of the same app pointed at one database**
+— e.g. a copy of the project made for an A/B test, sharing the original's DB
+because "it's the same schema". Both instances then fight over the same
+un-namespaced tables: unique keys collide (`users.chatid` — the second
+instance's upsert of the same person overwrites/loses), and natural-key
+lookups pick whichever row came last (a message-mirror table keyed by
+`sender_id + message_id` resolves to the *other* instance's chat, because
+message ids are only unique per bot). Observed live (2026-10-12): two clones
+of one support-bot shared a DB, and an unfinished input state from the test
+clone intercepted the other clone's admin flow mid-broadcast.
+
+If your app tables have no `bot_id` column (and no query-level scoping by
+one), **every deployment instance must get its own database** — the clone
+step is `CREATE DATABASE` + changed `DB_*` env values, not a shared
+connection string. Rule of thumb: sharing a DB between instances is only
+safe when *every* shared table carries a `bot_id` column and *every* query
+scopes by it — the same standard the framework core applies to its own
+layers in the table above.
+
 ## Delivery semantics
 
 Multi-bot calls ride on the same HTTP client as every other API call:
@@ -1138,6 +1161,15 @@ php bin/tgbase make:language en     # creates Language/en.php scaffold
 `Language/fa.json.example` shows the JSON format if you prefer JSON files (then set `LANG_DRIVER=json`).
 
 
+## Lazy `filename.key` loading (2026-10)
+
+A miss on a dot-key (e.g. `__('shop.open')`) now tries
+`Language/{lang}/shop.{php,json}` once and merges it — files added after
+the language cache was built (or during a stale TTL window) resolve
+transparently, without a reload. Unknown prefixes fall straight back to
+the default; the attempt happens at most once per prefix per request.
+
+
 ======================================================================
 SECTION: DOC: BUTTONS  (docs/en/buttons.md)
 ======================================================================
@@ -1248,9 +1280,42 @@ Compiled definitions are cached under the key `buttons:all` with `BUTTONS_CACHE_
 
 Cache key / reach follow [caching.md](caching.md): on `array` the cache is per-process; on `file`/`redis`/`memcached` the definitions are shared across workers.
 
+## Editing a message without losing its inline keyboard
+
+`editMessageText()` **replaces the whole message**, not just the text: called without `reply_markup`, any inline keyboard the message had is gone. When the edited message must keep its buttons, capture the original markup and pass it straight through:
+
+```php
+$markup = $msg->reply_markup ?? null;   // from the update's message object
+
+$tg->editMessageText($chatId, $msgId, $newText, $markup !== null
+    ? ['reply_markup' => $markup]
+    : []);
+```
+
+The same rule applies to media edits (`editMessageCaption`, `editMessageMedia`) and to relay/mirror flows that copy one chat's messages into another: keep the copy's markup (e.g. alongside the source/copy message ids in your own table) and hand it back on every edit, or the mirrored message silently loses its buttons after the first edit. (Verified live in a user↔admin support relay, 2026-10-12: without the pass-through, the info keyboard on the group copy vanished on the first text edit.) For media messages that Telegram refuses to text-edit (sticker, video note, voice), `editMessageReplyMarkup($chatId, $msgId, ...)` is the graceful fallback.
+
+## UX convention: every input state shows its exit
+
+Any state that waits for free text — search box, broadcast payload, a value to ban/unban, an answer to forward — must render a Reply Keyboard with **visible exit buttons** (e.g. `↩️ بازگشت` / `↩️ Back`, `❌ لغو` / `❌ Cancel`) and its text handler must recognize those labels before treating the input as data. A text-only cancel command (`/cancel`) is not a substitute: it is undiscoverable. Observed live (2026-10-12): an admin tapped *Block*, got a bare "send the user id" prompt with the old panel keyboard still on screen and no visible way out — and had to escape via the main-menu button. Pair the buttons with a fresh prompt message (so the keyboard swap is visible), and when a flow abandons or reshapes a keyboard, follow the keyboard-cycle rule: send a fresh markup or `remove_keyboard` instead of leaving a stale one (see [conversations.md](conversations.md)).
+
 ## Test commands (integration/TestBot)
 
 `/btn` (if present in your plugin set) — the shipped `StartPlugin` shows `btn('start')` in action; the P-CACHE suite verified `btn('start')` resolves (`rows=1`) and its payload persists cross-process under `buttons:all`.
+
+
+## Request-shaped payloads + Mini App button (2026-10)
+
+```php
+Keyboard::remove();                    // ['remove_keyboard' => true] (+selective)
+Keyboard::forceReply(false, 'جواب…');  // ['force_reply' => true, 'input_field_placeholder' => …]
+Keyboard::reply()->webApp('فروشگاه', 'https://shop.example.com');  // KeyboardButtonWebApp
+```
+
+`remove()` is the TM-25 hygiene primitive: attach it (json_encoded) to the
+next message whenever a custom keyboard must disappear — abandoned flow,
+closed panel. `webApp()` opens a Telegram Mini App (reply keyboards in
+private chats, inline keyboards anywhere); the app receives
+`WebApp.initData` which must be validated server-side.
 
 
 ======================================================================
@@ -1521,6 +1586,27 @@ If Telegram's requests reach PHP through Cloudflare (or any reverse proxy), PHP'
 
 Rule of thumb: **IP check = direct exposure; secret = proxied exposure.** Using both is fine too.
 
+## Playbook: real traffic gets `403 Forbidden`
+
+`getWebhookInfo` only ever says `Wrong response from the webhook: 403 Forbidden` — it never names the validation layer that rejected the request. The app log does (`⛔ Webhook from unknown IP: …` vs `⛔ Webhook secret token mismatch`), and since the hardening release those two warnings carry their own fix in the message text.
+
+The sneakiest variant is **secret drift**: `.env` is correct and untouched, but a *later* `setWebhook` call — typically a re-registration to add an `allowed_updates` type — went out without the original `secret_token` (or with a different value). Every real delivery then fails with 403 while code, `.env` and docs all look perfect. Observed live on a production pair (2026-10-12): both bots of the deployment went dark at the same moment, `pending_update_count` stuck above zero, zero app-side errors besides the mismatch line.
+
+Prove which layer fails with one request from the server itself:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  -H "X-Telegram-Bot-Api-Secret-Token: <SECRET_FROM_DOT_ENV>" \
+  -H 'Content-Type: application/json' \
+  -d '{"update_id":1,"message":{"message_id":1,"date":1,"chat":{"id":1,"type":"private"},"from":{"id":1,"is_bot":false,"first_name":"diag"},"text":"ping"}}' \
+  "https://yourdomain.com/webhook.php"
+```
+
+- **`200`** while `getWebhookInfo` still reports 403 → *secret drift*: the value registered at Telegram's side differs from the current `.env`. Fix = re-run `setWebhook` with the exact `BOT_WEBHOOK_SECRET` from `.env` (add `drop_pending_updates=true` to flush the stale backlog), then confirm `last_error_message` stays empty.
+- **`403`** from this curl too → read the app log: *unknown IP* means you are behind a proxy (section above); *secret mismatch* means header and `.env` genuinely differ (`.env` quoting is handled by the env loader; stray whitespace inside the curl header is not).
+
+Recovery rule of thumb: **`.env` is the single source of truth — every `setWebhook` re-registration must copy `secret_token` from it verbatim.**
+
 ## Mode behaviour on the webhook entry
 
 | `BOT_MODE` | What `webhook.php` does |
@@ -1548,6 +1634,14 @@ Restrict what Telegram sends you to the update types your plugins actually handl
 curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=...&secret_token=...&allowed_updates=[\"message\",\"edited_message\",\"callback_query\",\"channel_post\",\"edited_channel_post\"]"
 ```
 
+> **`allowed_updates` silently gates plugin handlers.** A plugin method like
+> `onEditedMessage()` (or `onChannelPost()`, `onMyChatMember()`, …) only ever
+> runs if the webhook was registered with that update type — Telegram doesn't
+> send what you didn't ask for, and *nothing anywhere raises an error*. If you
+> add a handler for a new update type, re-run `setWebhook` with the complete
+> list. And carry the `secret_token` parameter in **every** `setWebhook` call:
+> it is not remembered from previous registrations (see the playbook below).
+
 ## Health checks
 
 `getWebhookInfo` is your dashboard — watch:
@@ -1561,6 +1655,21 @@ A deployment checklist for webhook mode:
 2. `BOT_WEBHOOK_SECRET` ≥ 32 random characters, identical in `.env` and `setWebhook`.
 3. `WEBHOOK_CHECK_IP` matches your network topology (see the proxy section).
 4. `getWebhookInfo` clean after a test message; your plugin's side effect visible.
+
+
+## Webhook management CLI (2026-10)
+
+```bash
+php bin/tgbase webhook:info                       # url, allowed_updates, pending, last_error
+php bin/tgbase webhook:set --url=https://host/webhook.php
+php bin/tgbase webhook:del [--drop-pending]
+```
+
+`webhook:set` derives `secret_token` from `BOT_WEBHOOK_SECRET` and uses the
+recommended `allowed_updates` default — `message,edited_message,
+callback_query,my_chat_member,chat_member` — so `onEditedMessage()` hooks
+receive edits out of the box. `webhook:info` warns explicitly when the
+active webhook's `allowed_updates` misses `edited_message`.
 
 
 ======================================================================
@@ -1811,6 +1920,20 @@ Copy [.env.example](../../.env.example) to `.env` and edit. Values shown are def
 - There is deliberately **no `VERIFY_TLS=false` knob** — TLS verification to api.telegram.org is always on.
 
 
+## LOG_API_TRACE (2026-10)
+
+```dotenv
+LOG_API_TRACE=1            # one delivery line per outgoing Bot API call
+LOG_API_TRACE_POLL=0       # also trace getUpdates long polls (noisy)
+```
+
+Line shape: `📡 sendMessage → ok 128ms chat 82267967` (or
+`… → FAIL 91ms chat 123 | 403 Forbidden: …`). Payloads are never logged —
+only method, chat_id, duration and the error summary. Registers via the
+library's static `Telegram::onApiCall()` hook, so it covers every bot in
+`BOT_EXTRA_BOTS` too. Keep it off for quiet high-volume logs.
+
+
 ======================================================================
 SECTION: DOC: FEATURES  (docs/en/features.md)
 ======================================================================
@@ -2001,6 +2124,23 @@ RESULT: OK
 Exit code `0` = all checks pass, `1` = at least one failure.
 
 
+## Edited updates (2026-10)
+
+`edited_message` / `edited_channel_post` / `edited_business_message` are
+dispatched by PluginHandler to `onEditedMessage($msg, $tg)` (and friends)
+with the same priority and `#[ChatType]` rules as normal hooks — the typed
+accessors (`$tg->editedMessage()`, `chatType()`, `chatId()`, …) work on
+edits. One deployment precondition: the webhook's `allowed_updates` must
+include `edited_message` (the default of `tgbase webhook:set`).
+
+## Media helper (2026-10)
+
+`App\Shared\Media::download($tg, $fileId, ?dir, ?name)` saves incoming
+files under `storage/downloads`; `Media::send($tg, $type, $chatId, $src,
+$opts)` sends by `file_id` or local path (auto-CURLFile). See
+[media.md](media.md).
+
+
 ======================================================================
 SECTION: DOC: TESTING  (docs/en/testing.md)
 ======================================================================
@@ -2090,6 +2230,21 @@ php tests/run.php --filter=Security   # env/log hardening rules
 The integration harness used during crash-testing (a real bot + scenario scripts) lives in `integration/TestBot/` — see its README for what it does and how to adapt it to your own deployment.
 
 
+## Replaying updates — `tgbase simulate` (2026-10)
+
+```bash
+php bin/tgbase simulate tests/Fixtures/updates/start.json --dry   # parse-only
+php bin/tgbase simulate tests/Fixtures/updates/                   # dispatch all
+php bin/tgbase simulate my_update.json                            # one fixture
+```
+
+`--dry` validates the JSON and reports which plugin hook would fire — no
+API calls. Without it, updates are dispatched through the REAL pipeline
+(plugins run; use a test bot). Sample fixtures ship in
+`tests/Fixtures/updates/` (start, edited_message, callback_query) and in
+`examples/fixtures/`.
+
+
 ======================================================================
 SECTION: DOC: TROUBLESHOOTING  (docs/en/troubleshooting.md)
 ======================================================================
@@ -2114,7 +2269,9 @@ SECTION: DOC: TROUBLESHOOTING  (docs/en/troubleshooting.md)
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | Webhook returns `403` for every delivery | IP whitelist active but a proxy/CDN rewrites the source IP | behind Cloudflare/nginx set `WEBHOOK_CHECK_IP=false` and rely on a strong `BOT_WEBHOOK_SECRET` — see [webhook.md](webhook.md#behind-cloudflare--nginx-proxies-important) |
-| Webhook returns `403`, `getWebhookInfo` says secret mismatch | `BOT_WEBHOOK_SECRET` in `.env` ≠ `secret_token` passed to `setWebhook` | make them identical; rotate with `openssl rand -hex 32` |
+| Webhook returns `403`, app log says `secret token mismatch` | `BOT_WEBHOOK_SECRET` in `.env` ≠ `secret_token` passed to `setWebhook` — either a typo, or **secret drift**: a later `setWebhook` (e.g. to add an `allowed_updates` type) went out without the original secret | make them identical (`openssl rand -hex 32` to rotate) and re-run `setWebhook` with the exact `.env` value; one curl with the `.env` secret proves which side drifted — full playbook in [webhook.md](webhook.md#playbook-real-traffic-gets-403-forbidden) |
+| `onEditedMessage()` (or any extra update-type handler) never fires, no error anywhere | webhook registered without that type in `allowed_updates` — Telegram never sends it | re-run `setWebhook` with the complete `allowed_updates` list (and the current `secret_token`) — see [webhook.md](webhook.md#registering-with-allowed-updates-optional) |
+| Log file mixes two UTC offsets (webhook lines vs cron lines) | PHP-FPM and CLI run under different `php.ini` timezones | set `LOG_TIMEZONE` (e.g. `"Asia/Tehran"`) to pin every Monolog timestamp to one zone |
 | Webhook returns `500` with "BOT_MODE ... is CLI-only" | CLI-only mode on the web entry (the v2.4.0 SAPI guard) | set `BOT_MODE=webhook_direct` / `webhook_queue` for the web entry, or run the mode from the CLI (`bot.php` / `queue.php`) |
 | `getWebhookInfo`: `last_error_message="Read timeout expired"` | endpoint didn't answer in time (pre-v2.4.0 this could be the infinite-loop bug; post-v2.4.0 it's slow handlers) | upgrade to ≥ v2.4.0; check for slow handlers; move heavy work to `webhook_queue` |
 | `pending_update_count` keeps growing | your endpoint is down/failing continuously | check `last_error_message`, TLS certificate validity, and that `webhook.php` is reachable; a bare GET returning `400 empty` proves the dispatcher is alive |
@@ -2148,6 +2305,132 @@ php tests/run.php --filter=Queue   # subsystem deep-dive
 curl "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"   # Telegram-side view
 ```
 
+
+======================================================================
+SECTION: DOC: MINI APPS  (docs/en/mini-apps.md)
+======================================================================
+
+# Mini Apps — `initData` validation
+
+Telegram **Mini Apps** (formerly Web Apps) are normal web pages opened inside Telegram. The frontend receives a **signed identity string** — `Telegram.WebApp.initData` — that proves *which Telegram user* is looking at the page. Your backend must verify that signature before serving any user-specific data. This guide covers the backend half, which ships as a small validator class:
+
+- Framework: `alirezax5\TelegramBase\App\MiniApp\InitData`
+- Library-only projects (SDK without the framework): `telegramBotApiPhp\WebApp\InitData`
+
+> **Never trust `initDataUnsafe`.** It carries the same fields but *without* the signature. Anyone can post arbitrary JSON to your endpoint — the signed `initData` is the only thing that can be verified against your bot token.
+
+## The flow
+
+```
+┌─────────────┐  1. open Mini App   ┌──────────────────┐
+│ Telegram     │ ──────────────────► │ Mini App page     │  your HTTPS host
+│ chat         │                     │ (static HTML/JS)  │
+└─────────────┘                     └────────┬─────────┘
+       ▲                                    │  2. POST { initData } (fetch/form)
+       │  4. render validated JSON          ▼
+┌──────┴───────┐                     ┌──────────────────┐
+│ Mini App UI  │ ◄────────────────── │ backend endpoint  │  InitData::validate()
+└─────────────┘                     └──────────────────┘
+```
+
+Mini App traffic does **not** pass through the bot webhook — it is the user's browser calling your domain directly. `BOT_MODE`, queues and `allowed_updates` are not involved. The only proof of identity is the signed `initData`, so validate it on **every** privileged request.
+
+## Backend usage
+
+```php
+use alirezax5\TelegramBase\App\MiniApp\InitData;
+
+// Accept classic form POST or a JSON body.
+$raw = $_POST['initData'] ?? null;
+if (!is_string($raw) || $raw === '') {
+    $json = json_decode((string) file_get_contents('php://input'), true);
+    $raw  = is_array($json) ? (string) ($json['initData'] ?? '') : '';
+}
+
+// Token auto-detected from BOT_TOKEN; pass it explicitly for multi-bot:
+//   InitData::validate($raw, $extraBotToken, ['max_age' => 3600])
+$res = InitData::validate((string) $raw, null, ['max_age' => 3600]);
+
+if (!$res['ok']) {
+    http_response_code(401);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['ok' => false, 'error' => $res['error']]);
+    exit;
+}
+
+$user       = $res['user'];        // ['id' => 555000111, 'first_name' => 'Ali', 'username' => ...]
+$startParam = $res['start_param']; // deep-link payload from ?startapp=ref_7
+$authDate   = $res['auth_date'];   // unix ts the signature was issued
+```
+
+A complete runnable endpoint + page is in [examples/MiniAppEndpoint.php](../examples/MiniAppEndpoint.php).
+
+## API
+
+| Method | Signature | Returns |
+|---|---|---|
+| `validate()` | `validate(string $initData, ?string $botToken = null, array $options = [])` | Full result array (below) |
+| `valid()` | same args | `bool` |
+| `user()` | same args | `?array` — the Mini App user, or `null` when invalid |
+| `build()` | `build(array $fields, ?string $botToken = null)` | A correctly **signed** initData string — for tests, fixtures and local curl-ing |
+
+**Result (success):** `ok`, `user` (decoded array or `null`), `auth_date`, `start_param`, `fields` (all decoded fields without the hash), `hash`.
+
+**Result (failure):** `ok: false` + `error`, one of: `empty_init_data`, `bot_token_missing`, `malformed_init_data`, `hash_missing`, `bad_signature`, `auth_date_missing`, `auth_date_expired`.
+
+**Options:** `max_age` — maximum accepted age of `auth_date` in seconds. Default `86400` (24 h); `0` disables the check. Use short windows (e.g. `3600`) for sensitive operations.
+
+## Frontend snippet
+
+```html
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+  fetch('/miniapp/shop.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData: Telegram.WebApp.initData })
+  })
+    .then(r => r.json())
+    .then(d => { /* d.ok ? render(d) : show(d.error) */ });
+</script>
+```
+
+Opening the Mini App from a bot: `Keyboard::reply()->webApp('Open Shop', 'https://your.domain/miniapp/shop.php')` (see [buttons.md](buttons.md)) or set the bot's Menu Button via BotFather. Deep-link parameters arrive as `start_param` from `https://t.me/yourbot?startapp=ref_7`.
+
+## Local testing without Telegram
+
+`build()` signs a fixture string with your token, so endpoints can be exercised with curl before the frontend exists:
+
+```bash
+php -r '
+require "vendor/autoload.php";
+use alirezax5\TelegramBase\App\MiniApp\InitData;
+echo InitData::build(["user" => ["id" => 555000111, "first_name" => "Ali"], "start_param" => "ref_7"], getenv("BOT_TOKEN"));
+' > /tmp/init.txt
+
+curl -s https://your.domain/miniapp/shop.php --data-urlencode "initData@/tmp/init.txt"
+```
+
+> `build()` is for **development only** — it exists so you can test the validator; it is not needed in production and must obviously never be exposed as an endpoint.
+
+## Security checklist
+
+- Validate server-side on **every** privileged request; the signature proves the *user*, not the *request's business logic*.
+- Keep `max_age` tight (`3600` or less) — `initData` does not expire on its own.
+- The comparison uses `hash_equals` (constant-time). Never compare hashes with `===`.
+- Do not log `initData` or bot tokens; they are bearer credentials.
+- The `signature` field (Ed25519) that Telegram also sends is for validating **third-party** Mini Apps; for your own bot, the HMAC `hash` check above is the official and sufficient scheme.
+- Serve the frontend over HTTPS only — Telegram requires it and `initData` is only as trustworthy as the channel it travels over.
+
+## How the validation works (reference)
+
+1. Parse `initData` as a query string; remove `hash`.
+2. Data-check-string = every remaining field as `key=value`, sorted alphabetically by key, joined with `\n` (0x0A).
+3. `secret_key = HMAC_SHA256(key="WebAppData", message=BOT_TOKEN)`
+4. `computed   = HMAC_SHA256(key=secret_key, message=data_check_string)` — hex.
+5. Valid iff `computed == hash` (constant-time), and `auth_date` within `max_age`.
+
+The test suite pins this with a **cross-language vector**: `tests/Unit/MiniAppInitDataTest.php` validates an initData string generated independently in Python — catching the classic silent bug of HMAC key/message arguments swapped.
 
 ======================================================================
 SECTION: META: ENV TEMPLATE  (.env.example)
@@ -2199,10 +2482,21 @@ CRON_MAX_TIME=50
 # ============================================
 # Plugins
 # ============================================
-PLUGINS_DIR="/Plugin/"
+# Relative to the project root (recommended). An absolute path also works,
+# but if it does not exist on disk it is auto-resolved against the project
+# root (a warning is logged).
+PLUGINS_DIR="Plugin"
 PLUGIN_CACHE_ENABLED=true
 PLUGIN_CACHE_TTL=300
 PLUGINS_RELOAD_INTERVAL=600
+
+# Core plugins — framework-shipped plugin classes that live OUTSIDE the
+# Plugin/ directory and therefore cannot be discovered by the file scan.
+# Comma-separated FQCNs (leading backslash tolerated). To enable the
+# multi-step Conversation engine (needs the conversations migration):
+#   CORE_PLUGINS='alirezax5\TelegramBase\App\Conversation\ConversationManager'
+# See docs/conversations.md. Leave empty for bots that do not use them.
+CORE_PLUGINS=""
 
 # ============================================
 # Language
@@ -2323,16 +2617,31 @@ MEMCACHED_PASSWORD=""
 # ============================================
 # Logging
 # ============================================
+# Default is ON since the core-fixes release (silent-loss fix).
 LOG_ENABLED=true
 LOG_DIR="./logs"
 LOG_FILE="log.txt"
 LOG_LEVEL="debug"
+# Pin log timestamps to one timezone (e.g. "Asia/Tehran", "UTC").
+# Web (PHP-FPM) and CLI/cron often run under different php.ini zones, which
+# mixes two offsets into the same log file. Empty or invalid = runtime default.
+LOG_TIMEZONE=""
 
 # ============================================
 # Admins
 # ============================================
 # Comma-separated Telegram user ids for AdminGuardMiddleware.
 ADMINS_WHITELIST=""
+
+# ── 2026-10 upgrade batch ──────────────────────────────────────────────
+# One delivery line per outgoing Bot API call (method, chat_id, duration,
+# ok/fail, error summary — never payloads). Keep off for quiet high volume.
+LOG_API_TRACE=0
+LOG_API_TRACE_POLL=0
+# Where Media::download() saves files (default {base}/storage/downloads)
+#MEDIA_DOWNLOAD_DIR=
+# MenuFlow per-chat state TTL seconds (default 86400)
+#MENUFLOW_STATE_TTL=86400
 
 
 ======================================================================
@@ -2345,6 +2654,60 @@ All notable changes to TelegramBase are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/) (`vMAJOR.MINOR.PATCH` git tags).
 
 ## [Unreleased]
+
+### Added — Mini App `initData` validation (2026-10-12)
+
+- **`App\MiniApp\InitData`** — server-side validator for Telegram Mini App identity strings, implementing the official HMAC-SHA256 scheme (`secret = HMAC_SHA256("WebAppData", BOT_TOKEN)` → compare `hash` with `hash_equals`). The bot token is auto-detected from the environment, so a single-bot endpoint is one call: `InitData::validate($raw)`; multi-bot deployments pass the owning token explicitly. API: `validate()` (full result: `user`, `auth_date`, `start_param`, `fields`, `hash`, or `error` — `bad_signature` / `auth_date_expired` / …), `valid()`, `user()` and `build()` (development-only signed fixture generator for curl-testing endpoints before the frontend exists).
+- **`max_age` freshness window** — `auth_date` older than `max_age` seconds is rejected (default `86400`, `0` disables). `initData` never expires on its own; the window is the replay defense.
+- **Docs** — `docs/en/mini-apps.md` + `docs/fa/mini-apps.md` (full guide: frontend→backend flow diagram, endpoint pattern accepting form/JSON, API table, `Keyboard::reply()->webApp()` entry points, local testing with `build()`, security checklist, algorithm reference) plus compact localized pages for ar/zh/ru/fr/pt; hub index and llms manifests updated.
+- **Runnable example** — `examples/MiniAppEndpoint.php`: one file serving both the Mini App page and a POST endpoint that validates `initData` (form or JSON body) and answers with trusted identity JSON.
+- **Cross-language test pin** — `tests/Unit/MiniAppInitDataTest.php` (9 cases): validates a reference `initData` generated **independently in Python**, so a silent HMAC key/message argument swap can never pass again; plus tampered-hash, tampered-payload, wrong-token, expiry, missing-hash, env auto-detect and helper coverage. The same validator also ships standalone in the underlying library as `telegramBotApiPhp\WebApp\InitData` (explicit token, no env lookup). Suite: 394 pass / 0 fail.
+
+### Added — base upgrade batch: API trace, webhook CLI, update replay, MenuFlow, media, keyboard payloads (2026-10-12)
+
+Distilled from live operation of the payam support-relay bot (TM-25 feedback + the two "message never arrived" outages):
+
+- **`LOG_API_TRACE=1`** — one delivery line per outgoing Bot API call through a new static `Telegram::onApiCall()` hook in the underlying library (compact info: method, chat_id, duration, ok/fail, error summary, retry_after — never payloads; covers every `BOT_EXTRA_BOTS` instance). Gated by `LOG_API_TRACE_POLL` for getUpdates noise. New `App\Bot\ApiTrace` installs the logger during `BotManager` boot. Motivation: the app log previously recorded only boot lines, so "the message never arrived" required a bespoke per-bot trace file (TgTrace) to debug.
+- **`tgbase webhook:info|set|del`** — webhook management from the CLI; `set` derives `secret_token` from `BOT_WEBHOOK_SECRET` and defaults `allowed_updates` to the recommended set **including `edited_message`**; `info` prints url/pending/last_error and warns loudly when the live webhook's `allowed_updates` misses `edited_message` (the silent `onEditedMessage()`-never-fires trap).
+- **`tgbase simulate <fixture.json|dir> [--dry]`** — replay saved Telegram updates through the real pipeline (or parse-only with `--dry`, which reports the hook that would fire, e.g. `onEditedMessage()`). Sample fixtures ship in `tests/Fixtures/updates/` (start / edited_message / callback_query) and `examples/fixtures/`.
+- **`Keyboard` request-shaped payloads + Mini App button** — `Keyboard::remove()` (TM-25 keyboard hygiene: attach to the next message whenever a custom keyboard must disappear), `Keyboard::forceReply($selective, $placeholder)`, `Keyboard::reply()->webApp($text, $url)` (KeyboardButtonWebApp).
+- **`App\Shared\Media`** — `download($tg, $fileId, ?dir, ?name)` (getFile → `getFileUrl()` → stream to `storage/downloads` or `MEDIA_DOWNLOAD_DIR`) and `send($tg, $type, $chatId, file_id|local_path, $opts)` (auto-CURLFile; photo/video/audio/voice/video_note/animation/document/sticker; unknown types throw).
+- **`App\Conversation\MenuFlow`** — a DB-free screen machine for panel-style plugins: named screens (text/kb as closures), label→screen navigation, built-in «بازگشت»/«منوی اصلی» with `parent` walking, `'parse'` input screens routed to `onInput()`, CacheManager-backed per-chat state (`MENUFLOW_STATE_TTL`), and `exit()` that sends `remove_keyboard`. Extracted from the live support panel after the owner's TM-25 report that hand-rolled panels shipped input screens without a visible cancel and left dead keyboards behind.
+- **Lazy `__()` filename.key loader** — a dot-key miss tries `Language/{lang}/{prefix}.{php,json}` exactly once and merges it, so subfiles added after the language cache was built resolve transparently (no reload, no retry storms; unknown prefixes fall back to the default).
+- **Library hook** — `telegramBotPhp` gained the static `onApiCall()` observer (fired once per `bot()` call, tracing wrapped so it can never break delivery); framework vendor overlaid in-place until the next library tag.
+- **New docs** — `docs/{en,fa}/media.md`, `docs/{en,fa}/menu-flows.md`, `docs/{en,fa}/recipes.md` (six production patterns: relay+edit sync, non-stranding panels, private-only panel/reply-only group, delivery debugging incl. the **`.env` must stay FPM-readable** trap — a 640 root-owned `.env` surfaces as "BOT_TOKEN is not set" HTTP 500s that never reach the app log — keyboard hygiene checklist, Mini App entry points), release summaries for ar/zh/ru/fr/pt (`release-2026-10.md`), plus appended sections in webhook/testing/configuration/buttons/i18n/features (en/fa). Hub index updated.
+- **New runnable examples** — `examples/PanelBot.php` (MenuFlow admin panel), `examples/RelayEditSyncBot.php` (user↔admin relay with live edit sync + JSON id-map), `examples/ConversationFlow.php` (Step API with backable/menu), `examples/KeyboardBuilder.php` (inline/reply/remove/forceReply/webApp), `examples/MediaFiles.php` (download + send patterns).
+- **New tests** — `tests/Unit/BaseUpgradeTest.php` (11 offline cases: keyboard payloads, webApp button, lazy i18n load, MenuFlow routing, simulate dry-run, webhook CLI offline paths, ApiTrace callback contract, Media discriminator). Suite: 362 pass / 0 fail.
+
+
+### Added — webhook 403 hardening & log timezone (from a real production outage)
+
+- **Actionable `WebhookDispatcher` warnings.** Both 403 sources now log the *fix*, not just the fact: the IP-reject warning names `WEBHOOK_CHECK_IP=false` for proxy/CDN setups, and the secret-mismatch warning says to re-run `setWebhook()` with the current `BOT_WEBHOOK_SECRET`. Reason: `getWebhookInfo` only ever reports "Wrong response from the webhook: 403 Forbidden" — the app log line is the only place that names the failing layer, and a bare one gives no hint. The incident that motivated this (2026-10-12): **secret drift** — a routine `setWebhook` re-registration went out without the original `secret_token`, so both production bots silently rejected every real delivery while `.env`, code and docs all looked correct; the pair stayed dark until a live test exposed it.
+- **`LOG_TIMEZONE`** (optional) pins Monolog log timestamps to one zone. Web (PHP-FPM) and CLI/cron workers of one deployment frequently run under different `php.ini` timezones, which mixed two offsets into the same log file and made incident timelines unreadable. `LoggerConfig::fromEnv()` resolves it into a new readonly `timezone` property (`null` = runtime default; invalid identifier falls back to `null` too — a typo in an observability knob must not kill the boot), `LogHandler` passes it to the Monolog constructor. Covered by the new `tests/Unit/LoggerTimezoneTest.php`; `.env.example` documents the key.
+- **Docs — webhook 403 playbook** ([webhook.md](docs/en/webhook.md)): the one-request curl proof that separates secret drift from proxy/IP rejection; the recovery rule ("`.env` is the single source of truth — every `setWebhook` re-registration copies `secret_token` from it verbatim"); and the **`allowed_updates` ↔ plugin-handler gating** warning (`onEditedMessage()` etc. never fire — with no error anywhere — if the webhook was registered without that update type). Troubleshooting table rows added for both plus mixed log offsets.
+- **Docs — patterns distilled from the live support-relay deployment** (2026-10-12): `editMessageText()` without `reply_markup` strips the message's inline keyboard — capture the original markup and pass it through on every edit ([buttons.md](docs/en/buttons.md)); every input-taking state must show a **visible** Back/Cancel exit — text-only `/cancel` is undiscoverable and leaves admins stranded on a bare prompt ([buttons.md](docs/en/buttons.md)); cloning a deployment for A/B testing onto the SAME database collides on un-namespaced app tables — clone the database too ([multi-bot.md](docs/en/multi-bot.md)).
+- **`tests/migration_check.php`** — standalone sqlite validation of the users migrations (fresh full schema + legacy id-only table extended + idempotency round-trip, via the real `MigrationRunner`) now ships with the test suite instead of living only in fix bundles.
+
+### Added — Conversation engine promoted to the core (multi-step flows)
+
+- **`App/Conversation/`** — the conversation engine that was battle-tested live in the demo apps is now framework core: `Conversation` (abstract flow base), `Step` (declarative step builder), `ConversationManager` (priority-2 engine plugin: routing, validation/retry, skip, branching, timeout) and `ConversationStore` (Eloquent row per active chat).
+- **Declarative steps with both keyboard styles.** `Step::text()/photo()/callback()/display()`; fluent modifiers `ask()/withAsk()/pattern()/validate()/retry()/optional()/when()/buttons()/columns()/onDone()/backable()/menu()/compute()`. Text steps can be answered with a temporary **Reply Keyboard** — the tapped label is reverse-mapped to the canonical value through the translator (locale-independent stored values; raw value accepted too). `buttons()` accepts a **closure** for dynamic lists computed from the answers so far.
+- **Navigation inside a flow** — `backable()` renders a *Back* button (jumps to the previous input step of the effective path, prunes the target answer and everything after it, skips `display` steps; on the first input step there is no back target so the button is not rendered) and `menu()` renders a *Main menu* exit button. Nav works identically for inline (`conv:{flow}:__nav__:{back|menu}`) and Reply Keyboard (locale-reserved labels via `navBackTexts()/exitTexts()`; manual typing accepted).
+- **Display/compute steps** — `Step::display()` + `compute(fn(array $answers))` render a computed message (raw string or `[key, replacements]`) and auto-advance; recomputed after navigation.
+- **Core plugins (`CORE_PLUGINS`).** `PluginHandler` now registers plugin classes that live outside the scanned `Plugin/` dir from a comma-separated `CORE_PLUGINS` env (e.g. the Conversation engine). Core list is tracked separately from file hashes in the plugin cache; a changed list invalidates the cache; `getStats()` reports the core count. This also gives apps a general mechanism to register shared/plugin-pack classes without touching `Plugin/`.
+- **Idempotent migration** `2026_10_12_000003_create_conversations_table.php` creates the `conversations` state table (`bot_id` for multi-bot isolation, `chatid`, `flow`, `flow_class`, `step`, `answers` JSON, `status active|done|cancelled`, timestamps; `updated_at` is the timeout basis).
+- **Core language strings** shipped as `Language/{fa,en}/conv.php` + `conv.json` (`conv.cancelled/timeout/busy/use_buttons/stale/skip_not_allowed/retry_default/nav_back/exit_menu`) for both `php` and `json` drivers.
+- **App hooks** — `Conversation::$langResolver` (per-user language without coupling the core to an app model; still falls back to `Database\Users::langOf` automatically when that method exists) and `ConversationManager::$mainMenuMarkup` (markup for the exit-to-menu message).
+- New documentation: **`docs/en/conversations.md`** + **`docs/fa/conversations.md`** (full guide: enabling via `CORE_PLUGINS`, writing flows, step reference, nav rules, keyboard-cycle rules, control commands, storage) and README table rows (en/fa). `.env.example` documents `CORE_PLUGINS`.
+- New offline test suite `tests/Unit/ConversationTest.php` (Step API, `textMatches`, `applyLang` hook + fallback, `mainMenuMarkup` hook, `CORE_PLUGINS` registration incl. garbage-tolerant parsing, store shape).
+
+### Fixed — post-demo core fixes (fallback phase, role tiers, config footguns, i18n)
+
+- **Native fallback phase.** `App/Update/UpdateState.php` (per-update `markHandled()/isHandled()/handledBy()`, reset in `runAll()`) + `App/Plugin/Contract/FallbackInterface.php` (`onFallback`). `PluginHandler` indexes fallback plugins and runs a fallback phase after the main phase **only when no plugin marked the update handled** — the "command not found" reply is now a first-class plugin contract instead of a per-app convention. `getStats()` reports fallback count; legacy plugin caches are invalidated once by the new cache shape.
+- **Role tiers in the users layer.** `Database\Users` gains `ROLE_*` constants + `ROLE_HIERARCHY`, `rankOf()/roleOf()/setRole()/hasRole()/isAtLeast()/isSuperAdmin()` (superadmins from `ADMINS_WHITELIST`; DB errors fail-safe) and `checkAndInsert(chatid, ?lang, ?extra)` for idempotent upsert. New opt-in **`RoleMiddleware`** (fail-closed) for `#[Role('admin')]`-style gating. Schema: `create_users_table` ships the full modern schema for fresh installs and a new idempotent **`extend_users_table`** migration upgrades existing tables (`chatid` nullable + unique, `username`, `first_name`, `last_name`, `lang`, `role`, `active`, `status`, `registered_at`, `command`, `data`, `type`).
+- **`PLUGINS_DIR` footgun defused.** The historical default `'/Plugin/'` was interpreted as an absolute filesystem path (scanning `/Plugin` at the filesystem root and silently finding nothing). Default is now the relative `'Plugin'`; absolute values that don't exist are auto-resolved against the project root with a warning. `.env.example` updated.
+- **`LOG_ENABLED` now defaults to `true`** — silent failures (log file empty while errors happen) were the #1 deployment trap in real installs. (`run.php` still pins `'false'` for tests.)
+- **i18n gaps.** The `json` driver now loads flat `{lang}.json` main files (previously only `{lang}/*.json` sub-files worked) and falls back to the opposite extension; both `#key` and `:key` replacement syntaxes work everywhere (`applyReplacements`).
 
 Practical cache-layer verification release: the whole caching subsystem (CacheManager, sessions, translations, button definitions) was exercised live against real backends on a production server — one real cache bug and one wiring bug were found, fixed and re-verified.
 

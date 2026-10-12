@@ -186,3 +186,32 @@ RESULT: OK
 کد خروج `0` یعنی همهٔ بررسی‌ها موفق، `1` یعنی دست‌کم یک شکست.
 
 </div>
+
+
+## آپدیت‌های ویرایش (۲۰۲۶-۱۰)
+
+`edited_message` / `edited_channel_post` / `edited_business_message` توسط
+PluginHandler به `onEditedMessage($msg, $tg)` (و مشابه) می‌روند — با همان
+قواعد priority و `#[ChatType]` هوک‌های عادی — و accessorهای تایپ‌دار
+(`$tg->editedMessage()`، `chatType()`، `chatId()`، …) روی ویرایش‌ها کار
+می‌کنند. پیش‌نیاز دیپلوی: `allowed_updates` وب‌هوک باید `edited_message`
+را داشته باشد (پیش‌فرض `tgbase webhook:set`).
+
+## هلپر رسانه (۲۰۲۶-۱۰)
+
+`App\Shared\Media::download($tg, $fileId, ?dir, ?name)` فایل‌های ورودی را
+زیر `storage/downloads` ذخیره می‌کند؛ `Media::send($tg, $type, $chatId,
+$src, $opts)` هم با `file_id` و هم مسیر محلی می‌فرستد (CURLFile خودکار).
+ببینید [media.md](media.md).
+
+## initData مینی‌اپ (۲۰۲۶-۱۰)
+
+اعتبارسنجی سمت سرور رشتهٔ هویتی امضاشده‌ای که مینی‌اپ‌ها دریافت می‌کنند
+(`Telegram.WebApp.initData`) — تنها اثبات قابل‌اعتماد از اینکه کدام کاربر
+تلگرام بک‌اند مینی‌اپ شما را صدا می‌زند. `App\MiniApp\InitData::validate($raw)`
+الگوریتم رسمی HMAC-SHA256 را با مقایسهٔ زمان-ثابت پیاده می‌کند، تازگی
+`auth_date` را بررسی می‌کند (`max_age`، پیش‌فرض 86400 ثانیه) و `BOT_TOKEN` را
+از محیط تشخیص می‌دهد (در چند-رباتی توکن را صریح بدهید). هلپرها: `valid()`،
+`user()`، `build()` (فقط توسعه). همان اعتبارسنج به‌صورت مستقل در کتابخانه هم
+هست: `telegramBotApiPhp\WebApp\InitData`. راهنمای کامل:
+[mini-apps.md](mini-apps.md)؛ endpoint اجرایی: `examples/MiniAppEndpoint.php`.

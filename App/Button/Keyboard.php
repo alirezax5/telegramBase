@@ -211,4 +211,75 @@ final class Keyboard
             return '{}';
         }
     }
+
+    // ==================================================================
+    // Request-shaped keyboards (ready payloads, not builders)
+    // ==================================================================
+
+    /**
+     * remove_keyboard payload — attach as reply_markup when a custom
+     * keyboard must disappear (leaving a flow, closing a panel).
+     *
+     * TM-25 contract: never leave a dead keyboard behind. When the flow's
+     * keyboard shape changes or is abandoned, the next message must carry
+     * this payload.
+     *
+     *   $tg->sendMessage([
+     *       'chat_id'      => $chatId,
+     *       'text'         => 'پایان گفتگو',
+     *       'reply_markup' => json_encode(Keyboard::remove()),
+     *   ]);
+     */
+    public static function remove(bool $selective = false): array
+    {
+        return $selective
+            ? ['remove_keyboard' => true, 'selective' => true]
+            : ['remove_keyboard' => true];
+    }
+
+    /**
+     * force_reply payload — the user's next message arrives as a reply.
+     * Request-shaped like remove(); not a chained builder.
+     */
+    public static function forceReply(
+        bool $selective = false,
+        ?string $placeholder = null
+    ): array {
+        $out = ['force_reply' => true];
+
+        if ($selective) {
+            $out['selective'] = true;
+        }
+
+        if ($placeholder !== null && $placeholder !== '') {
+            $out['input_field_placeholder'] = $placeholder;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Mini App button (KeyboardButtonWebApp) — opens a Telegram Mini App
+     * when tapped. Valid on reply keyboards in PRIVATE chats and on inline
+     * keyboards; the Mini App receives WebApp.initData for server-side
+     * validation.
+     *
+     *   Keyboard::reply()->webApp('🛍 فروشگاه', 'https://shop.example.com')
+     */
+    public function webApp(string $text, string $url): self
+    {
+        $lastKey = array_key_last($this->rows);
+
+        if ($lastKey === null) {
+            $this->rows[] = [];
+            $lastKey = array_key_last($this->rows);
+        }
+
+        $this->rows[$lastKey][] = [
+            'text' => $text,
+            'web_app' => ['url' => $url],
+        ];
+
+        return $this;
+    }
 }

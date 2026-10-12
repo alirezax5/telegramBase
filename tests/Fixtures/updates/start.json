@@ -1,0 +1,10 @@
+{
+  "update_id": 1001,
+  "message": {
+    "message_id": 101,
+    "from": {"id": 82267967, "is_bot": false, "first_name": "Ali", "username": "alirezax5", "language_code": "fa"},
+    "chat": {"id": 82267967, "type": "private", "first_name": "Ali", "username": "alirezax5"},
+    "date": 1791810000,
+    "text": "/start"
+  }
+}

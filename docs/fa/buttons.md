@@ -111,3 +111,17 @@ ButtonManager::reload();                   // re-read files, refresh cache
 `/btn` (اگر در مجموعه پلاگین‌هایتان موجود باشد) — پلاگین همراه یعنی `StartPlugin` عملاً `btn('start')` را نشان می‌دهد؛ مجموعهٔ P-CACHE تأیید کرد که `btn('start')` resolve می‌شود (`rows=1`) و payload آن به‌صورت بین‌پروسه‌ای زیر `buttons:all` پایدار می‌ماند.
 
 </div>
+
+
+## پیلودهای آماده + دکمهٔ مینی‌اپ (۲۰۲۶-۱۰)
+
+```php
+Keyboard::remove();                    // ['remove_keyboard' => true] (+selective)
+Keyboard::forceReply(false, 'جواب…');  // ['force_reply' => true, 'input_field_placeholder' => …]
+Keyboard::reply()->webApp('فروشگاه', 'https://shop.example.com');  // KeyboardButtonWebApp
+```
+
+`remove()` مقدمهٔ بهداشت کیبورد TM-25 است: هرجا کیبورد سفارشی باید محو شود
+(فلو رهاشده، پنل بسته)، آن را (json_encode‌شده) به پیام بعدی بچسبانید.
+`webApp()` یک مینی‌اپ تلگرام باز می‌کند (کیبورد Reply در پیوی، اینلاین در
+همه‌جا)؛ اپ `WebApp.initData` می‌گیرد که باید سمت سرور اعتبارسنجی شود.

@@ -5,6 +5,7 @@ namespace Database;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Capsule\Manager as DB;
+use Illuminate\Database\QueryException;
 
 class Users extends Model
 {
@@ -17,19 +18,48 @@ class Users extends Model
     public $timestamps = false;
     protected $connection = 'main';
 
+    /** Role tiers, lowest to highest. 'superadmin' is never stored in DB —
+     * it resolves from the ADMINS_WHITELIST env (bot owners). */
+    public const ROLE_USER = 'user';
+    public const ROLE_MODERATOR = 'moderator';
+    public const ROLE_ADMIN = 'admin';
+    public const ROLE_SUPERADMIN = 'superadmin';
+
+    /** @var array<string,int> role => rank */
+    public const ROLE_HIERARCHY = [
+        self::ROLE_USER => 0,
+        self::ROLE_MODERATOR => 1,
+        self::ROLE_ADMIN => 2,
+        self::ROLE_SUPERADMIN => 3,
+    ];
+
     /**
      * Insert the user if they do not already exist.
      *
-     * @param int $chatid Telegram chat/user ID
+     * Optional seeding: the language_code hint captured from the /start
+     * update and any extra profile columns (username, first_name, ...).
+     * Seeding happens on INSERT only — existing rows are never overwritten
+     * (a returning user keeps their chosen language).
+     *
+     * @param int      $chatid Telegram chat/user ID
+     * @param string|null $lang Language code to seed for NEW users (nullable
+     *                         column; NULL means "not chosen yet")
+     * @param array    $extra  Extra columns for the INSERT (column => value)
      * @return bool True when a new row was inserted
      */
-    public static function checkAndInsert(int $chatid): bool
+    public static function checkAndInsert(int $chatid, ?string $lang = null, array $extra = []): bool
     {
         if (self::check($chatid)) {
             return false;
         }
 
-        return self::insertOrIgnore(['chatid' => $chatid]);
+        $payload = array_merge(['chatid' => $chatid], $extra);
+
+        if ($lang !== null) {
+            $payload['lang'] = $lang;
+        }
+
+        return self::insertOrIgnore($payload);
     }
 
     /**
@@ -41,6 +71,101 @@ class Users extends Model
     public static function check(int $chatid): bool
     {
         return self::where('chatid', $chatid)->exists();
+    }
+
+    // -----------------------------------------------------------------
+    // Role tiers: user < moderator < admin < superadmin(env)
+    // -----------------------------------------------------------------
+
+    /**
+     * Numeric rank of a role name. Unknown roles rank below 'user' (-1)
+     * so a typo in promote code can never grant accidental privileges.
+     */
+    public static function rankOf(string $role): int
+    {
+        return self::ROLE_HIERARCHY[$role] ?? -1;
+    }
+
+    /**
+     * Whether a chat id belongs to a bot owner (ADMINS_WHITELIST env,
+     * comma-separated chat ids). Same list AdminGuardMiddleware enforces —
+     * owners implicitly hold the superadmin tier.
+     */
+    public static function isSuperAdmin(int $chatid): bool
+    {
+        $allowed = trim((string) \alirezax5\TelegramBase\App\Environment\EnvHandler::get('ADMINS_WHITELIST', ''));
+
+        if ($allowed === '') {
+            return false;
+        }
+
+        return in_array((string) $chatid, array_map('trim', explode(',', $allowed)), true);
+    }
+
+    /**
+     * The user's stored role ('user' when unknown / missing row /
+     * pre-migration table without the role column).
+     */
+    public static function roleOf(int $chatid): string
+    {
+        try {
+            $role = self::where('chatid', $chatid)->value('role');
+        } catch (QueryException) {
+            return self::ROLE_USER; // pre-migration schema — fail safe, not open
+        }
+
+        return is_string($role) && isset(self::ROLE_HIERARCHY[$role])
+            ? $role
+            : self::ROLE_USER;
+    }
+
+    /**
+     * Assign a role. Unknown role names are rejected (return false).
+     * 'superadmin' is env-only and cannot be stored.
+     */
+    public static function setRole(int $chatid, string $role): bool
+    {
+        if (!isset(self::ROLE_HIERARCHY[$role]) || $role === self::ROLE_SUPERADMIN) {
+            return false;
+        }
+
+        try {
+            return self::updateFieldByChatId($chatid, 'role', $role);
+        } catch (QueryException) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether the user holds EXACTLY this role (superadmins from
+     * ADMINS_WHITELIST satisfy any role check).
+     */
+    public static function hasRole(int $chatid, string $role): bool
+    {
+        if (self::isSuperAdmin($chatid)) {
+            return true;
+        }
+
+        return self::roleOf($chatid) === $role;
+    }
+
+    /**
+     * Whether the user's role ranks at least at the given tier
+     * (user < moderator < admin < superadmin). This is the check
+     * RoleMiddleware and admin panels should use.
+     */
+    public static function isAtLeast(int $chatid, string $role): bool
+    {
+        if (self::isSuperAdmin($chatid)) {
+            return true;
+        }
+
+        $required = self::rankOf($role);
+        if ($required < 0) {
+            return false; // unknown required role — deny
+        }
+
+        return self::rankOf(self::roleOf($chatid)) >= $required;
     }
 
     /**

@@ -37,7 +37,10 @@ class LogHandler
                 mkdir($config->directory, 0777, true);
             }
 
-            self::$logger = new Logger('AppLogger');
+            // 4th ctor arg = pinned timezone (LOG_TIMEZONE); null keeps the
+            // runtime default. Keeps webhook (FPM) and CLI/cron lines in one
+            // offset inside the same log file.
+            self::$logger = new Logger('AppLogger', [], [], $config->timezone);
 
             $level = EnvHandler::get('LOG_LEVEL', 'debug');
 

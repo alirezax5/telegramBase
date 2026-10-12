@@ -102,7 +102,12 @@ final class WebhookDispatcher
 
         // --- IP whitelist ---
         if ($this->checkIp && !$this->isInTelegramNetwork($remoteIp)) {
-            LogHandler::warning("⛔ Webhook from unknown IP: {$remoteIp}");
+            // Actionable on purpose: getWebhookInfo only ever reports
+            // "Wrong response from the webhook: 403 Forbidden" — this line is
+            // the ONLY place that names the fix (real production outage,
+            // 2026-10-12: a proxied install lost every real delivery to this
+            // exact check and the bare warning gave no hint).
+            LogHandler::warning("⛔ Webhook from unknown IP: {$remoteIp} — if this bot runs behind Cloudflare/CDN/reverse proxy, set WEBHOOK_CHECK_IP=false in .env and rely on BOT_WEBHOOK_SECRET (verify with getWebhookInfo)");
             return new WebhookResponse(403, 'forbidden', 0);
         }
 
@@ -111,7 +116,12 @@ final class WebhookDispatcher
 
         if ($secret !== '') {
             if (!hash_equals($secret, $secretHeader)) {
-                LogHandler::warning('⛔ Webhook secret token mismatch');
+                // Actionable on purpose: the sneakiest failure mode is SECRET
+                // DRIFT — .env unchanged and correct, but a later setWebhook
+                // call (e.g. to add an allowed_updates type) went out without
+                // the original secret_token. Telegram then gets 403 on every
+                // real delivery while code and .env both look perfect.
+                LogHandler::warning('⛔ Webhook secret token mismatch — the secret_token registered via setWebhook() differs from BOT_WEBHOOK_SECRET in .env; re-run setWebhook() with the exact .env value (every future setWebhook call must carry secret_token=… — Telegram sees 403 Forbidden until they match)');
                 return new WebhookResponse(403, 'forbidden', 0);
             }
         }

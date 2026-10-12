@@ -290,6 +290,28 @@ The webhook front-controller resolves `secret → bot` first, then boots the
 framework with that bot's token and namespace — every later read/write then
 stays inside the bot's own sandbox automatically.
 
+### Cloning a deployment? Clone the database too
+
+The namespacing above protects **one process serving many bots**. A different
+trap is **two separate deployments of the same app pointed at one database**
+— e.g. a copy of the project made for an A/B test, sharing the original's DB
+because "it's the same schema". Both instances then fight over the same
+un-namespaced tables: unique keys collide (`users.chatid` — the second
+instance's upsert of the same person overwrites/loses), and natural-key
+lookups pick whichever row came last (a message-mirror table keyed by
+`sender_id + message_id` resolves to the *other* instance's chat, because
+message ids are only unique per bot). Observed live (2026-10-12): two clones
+of one support-bot shared a DB, and an unfinished input state from the test
+clone intercepted the other clone's admin flow mid-broadcast.
+
+If your app tables have no `bot_id` column (and no query-level scoping by
+one), **every deployment instance must get its own database** — the clone
+step is `CREATE DATABASE` + changed `DB_*` env values, not a shared
+connection string. Rule of thumb: sharing a DB between instances is only
+safe when *every* shared table carries a `bot_id` column and *every* query
+scopes by it — the same standard the framework core applies to its own
+layers in the table above.
+
 ## Delivery semantics
 
 Multi-bot calls ride on the same HTTP client as every other API call:

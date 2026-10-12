@@ -81,3 +81,18 @@ php tests/run.php --filter=Security   # env/log hardening rules
 ```
 
 The integration harness used during crash-testing (a real bot + scenario scripts) lives in `integration/TestBot/` — see its README for what it does and how to adapt it to your own deployment.
+
+
+## Replaying updates — `tgbase simulate` (2026-10)
+
+```bash
+php bin/tgbase simulate tests/Fixtures/updates/start.json --dry   # parse-only
+php bin/tgbase simulate tests/Fixtures/updates/                   # dispatch all
+php bin/tgbase simulate my_update.json                            # one fixture
+```
+
+`--dry` validates the JSON and reports which plugin hook would fire — no
+API calls. Without it, updates are dispatched through the REAL pipeline
+(plugins run; use a test bot). Sample fixtures ship in
+`tests/Fixtures/updates/` (start, edited_message, callback_query) and in
+`examples/fixtures/`.

@@ -147,3 +147,17 @@ Copy [.env.example](../../.env.example) to `.env` and edit. Values shown are def
 - `EnvironmentValidator` error messages name the missing key, never its value.
 - Webhook secrets are compared with `hash_equals()` (constant time).
 - There is deliberately **no `VERIFY_TLS=false` knob** — TLS verification to api.telegram.org is always on.
+
+
+## LOG_API_TRACE (2026-10)
+
+```dotenv
+LOG_API_TRACE=1            # one delivery line per outgoing Bot API call
+LOG_API_TRACE_POLL=0       # also trace getUpdates long polls (noisy)
+```
+
+Line shape: `📡 sendMessage → ok 128ms chat 82267967` (or
+`… → FAIL 91ms chat 123 | 403 Forbidden: …`). Payloads are never logged —
+only method, chat_id, duration and the error summary. Registers via the
+library's static `Telegram::onApiCall()` hook, so it covers every bot in
+`BOT_EXTRA_BOTS` too. Keep it off for quiet high-volume logs.

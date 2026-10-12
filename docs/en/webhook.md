@@ -44,6 +44,27 @@ If Telegram's requests reach PHP through Cloudflare (or any reverse proxy), PHP'
 
 Rule of thumb: **IP check = direct exposure; secret = proxied exposure.** Using both is fine too.
 
+## Playbook: real traffic gets `403 Forbidden`
+
+`getWebhookInfo` only ever says `Wrong response from the webhook: 403 Forbidden` — it never names the validation layer that rejected the request. The app log does (`⛔ Webhook from unknown IP: …` vs `⛔ Webhook secret token mismatch`), and since the hardening release those two warnings carry their own fix in the message text.
+
+The sneakiest variant is **secret drift**: `.env` is correct and untouched, but a *later* `setWebhook` call — typically a re-registration to add an `allowed_updates` type — went out without the original `secret_token` (or with a different value). Every real delivery then fails with 403 while code, `.env` and docs all look perfect. Observed live on a production pair (2026-10-12): both bots of the deployment went dark at the same moment, `pending_update_count` stuck above zero, zero app-side errors besides the mismatch line.
+
+Prove which layer fails with one request from the server itself:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  -H "X-Telegram-Bot-Api-Secret-Token: <SECRET_FROM_DOT_ENV>" \
+  -H 'Content-Type: application/json' \
+  -d '{"update_id":1,"message":{"message_id":1,"date":1,"chat":{"id":1,"type":"private"},"from":{"id":1,"is_bot":false,"first_name":"diag"},"text":"ping"}}' \
+  "https://yourdomain.com/webhook.php"
+```
+
+- **`200`** while `getWebhookInfo` still reports 403 → *secret drift*: the value registered at Telegram's side differs from the current `.env`. Fix = re-run `setWebhook` with the exact `BOT_WEBHOOK_SECRET` from `.env` (add `drop_pending_updates=true` to flush the stale backlog), then confirm `last_error_message` stays empty.
+- **`403`** from this curl too → read the app log: *unknown IP* means you are behind a proxy (section above); *secret mismatch* means header and `.env` genuinely differ (`.env` quoting is handled by the env loader; stray whitespace inside the curl header is not).
+
+Recovery rule of thumb: **`.env` is the single source of truth — every `setWebhook` re-registration must copy `secret_token` from it verbatim.**
+
 ## Mode behaviour on the webhook entry
 
 | `BOT_MODE` | What `webhook.php` does |
@@ -71,6 +92,14 @@ Restrict what Telegram sends you to the update types your plugins actually handl
 curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=...&secret_token=...&allowed_updates=[\"message\",\"edited_message\",\"callback_query\",\"channel_post\",\"edited_channel_post\"]"
 ```
 
+> **`allowed_updates` silently gates plugin handlers.** A plugin method like
+> `onEditedMessage()` (or `onChannelPost()`, `onMyChatMember()`, …) only ever
+> runs if the webhook was registered with that update type — Telegram doesn't
+> send what you didn't ask for, and *nothing anywhere raises an error*. If you
+> add a handler for a new update type, re-run `setWebhook` with the complete
+> list. And carry the `secret_token` parameter in **every** `setWebhook` call:
+> it is not remembered from previous registrations (see the playbook below).
+
 ## Health checks
 
 `getWebhookInfo` is your dashboard — watch:
@@ -84,3 +113,18 @@ A deployment checklist for webhook mode:
 2. `BOT_WEBHOOK_SECRET` ≥ 32 random characters, identical in `.env` and `setWebhook`.
 3. `WEBHOOK_CHECK_IP` matches your network topology (see the proxy section).
 4. `getWebhookInfo` clean after a test message; your plugin's side effect visible.
+
+
+## Webhook management CLI (2026-10)
+
+```bash
+php bin/tgbase webhook:info                       # url, allowed_updates, pending, last_error
+php bin/tgbase webhook:set --url=https://host/webhook.php
+php bin/tgbase webhook:del [--drop-pending]
+```
+
+`webhook:set` derives `secret_token` from `BOT_WEBHOOK_SECRET` and uses the
+recommended `allowed_updates` default — `message,edited_message,
+callback_query,my_chat_member,chat_member` — so `onEditedMessage()` hooks
+receive edits out of the box. `webhook:info` warns explicitly when the
+active webhook's `allowed_updates` misses `edited_message`.

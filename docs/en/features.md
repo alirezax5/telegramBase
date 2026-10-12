@@ -182,3 +182,33 @@ RESULT: OK
 ```
 
 Exit code `0` = all checks pass, `1` = at least one failure.
+
+
+## Edited updates (2026-10)
+
+`edited_message` / `edited_channel_post` / `edited_business_message` are
+dispatched by PluginHandler to `onEditedMessage($msg, $tg)` (and friends)
+with the same priority and `#[ChatType]` rules as normal hooks — the typed
+accessors (`$tg->editedMessage()`, `chatType()`, `chatId()`, …) work on
+edits. One deployment precondition: the webhook's `allowed_updates` must
+include `edited_message` (the default of `tgbase webhook:set`).
+
+## Media helper (2026-10)
+
+`App\Shared\Media::download($tg, $fileId, ?dir, ?name)` saves incoming
+files under `storage/downloads`; `Media::send($tg, $type, $chatId, $src,
+$opts)` sends by `file_id` or local path (auto-CURLFile). See
+[media.md](media.md).
+
+## Mini App initData (2026-10)
+
+Server-side validation of the signed identity string Mini Apps receive
+(`Telegram.WebApp.initData`) — the only trustworthy proof of which Telegram
+user is calling your Mini App backend. `App\MiniApp\InitData::validate($raw)`
+implements the official HMAC-SHA256 scheme with constant-time comparison,
+checks `auth_date` freshness (`max_age`, default 86400 s) and auto-detects
+`BOT_TOKEN` from the environment (pass the token explicitly for multi-bot).
+Helpers: `valid()`, `user()`, `build()` (dev-only signed fixture generator).
+The same validator ships standalone in the library as
+`telegramBotApiPhp\WebApp\InitData`. Full guide: [mini-apps.md](mini-apps.md);
+runnable endpoint: `examples/MiniAppEndpoint.php`.

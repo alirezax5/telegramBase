@@ -1,0 +1,11 @@
+{
+  "update_id": 1002,
+  "edited_message": {
+    "message_id": 102,
+    "from": {"id": 82267967, "is_bot": false, "first_name": "Ali", "username": "alirezax5", "language_code": "fa"},
+    "chat": {"id": -1004319223376, "type": "supergroup", "title": "Relay Group"},
+    "date": 1791810000,
+    "edit_date": 1791810600,
+    "text": "متن ویرایش‌شدهٔ پیام"
+  }
+}

@@ -48,6 +48,11 @@ final class Console
             'plugins' => fn (array $args) => PluginsList::run(),
             'doctor' => fn (array $args) => Doctor::run($args),
             'retry:drain' => fn (array $args) => RetryDrain::run(),
+            'webhook' => fn (array $args) => Webhook::run($args),
+            'webhook:info' => fn (array $args) => Webhook::run(['info', ...$args]),
+            'webhook:set' => fn (array $args) => Webhook::run(['set', ...$args]),
+            'webhook:del' => fn (array $args) => Webhook::run(['del', ...$args]),
+            'simulate' => fn (array $args) => Simulate::run($args),
             'list' => fn (array $args) => $this->list(),
             'help' => fn (array $args) => $this->help(),
         ];
@@ -100,5 +105,9 @@ final class Console
         echo "  php bin/tgbase plugins          # list discovered plugins\n";
         echo "  php bin/tgbase doctor           # run local diagnostics\n";
         echo "  php bin/tgbase doctor --telegram  # also test getMe\n";
+        echo "  php bin/tgbase webhook:info     # inspect the current webhook\n";
+        echo "  php bin/tgbase webhook:set --url=https://host/webhook.php\n";
+        echo "  php bin/tgbase webhook:del      # take the bot offline\n";
+        echo "  php bin/tgbase simulate tests/Fixtures/updates/start.json --dry\n";
     }
 }

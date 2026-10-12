@@ -78,6 +78,7 @@ Telegram
 | [docs/features.md](docs/fa/features.md) | سشن‌ها، کیبوردها، میدلور، کش، i18n، زمان‌بند، دیتابیس |
 | [docs/caching.md](docs/fa/caching.md) | کاووش عمیق CacheManager: درایورها، TTLها، دامنهٔ flush، ماتریس بین‌پروسه‌ای (تأییدشده به‌صورت زنده) |
 | [docs/sessions.md](docs/fa/sessions.md) | وضعیت سشن هر چت: API، جریان‌های چندمرحله‌ای، نکات امنیتی |
+| [docs/conversations.md](docs/fa/conversations.md) | فلوهای گفتگوی چندمرحله‌ای: مرحله‌های اعلانی، اعتبارسنجی/retry، شاخه‌بندی، ناوبری بازگشت/منو، اینلاین + Reply Keyboard، مهلت زمانی |
 | [docs/i18n.md](docs/fa/i18n.md) | ترجمه‌ها: چیدمان فایل، هلپر `__()`، زبان هر کاربر، کش |
 | [docs/buttons.md](docs/fa/buttons.md) | سازنده کیبورد + منوهای تعریف‌شده در فایل (`btn()`)، هندل‌کردن callback |
 | [docs/multi-bot.md](docs/fa/multi-bot.md) | چند ربات در یک پروسه: `BotManager`، `BOT_EXTRA_BOTS`، توکن‌استک (تأییدشده به‌صورت زنده) |

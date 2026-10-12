@@ -21,6 +21,9 @@ class Language
 
     private int $cacheTTL = 60;
     private string $langDriver = 'json';
+
+    /** @var array<string,array<string,true>> lazy-loaded subfile prefixes per lang */
+    private array $lazyLoaded = [];
     private array $missingKeys = [];
     private bool $missingKeysDirty = false;
     private LanguageConfig $config;
@@ -154,44 +157,73 @@ class Language
 
         $merged = [];
 
-        // 1) Load main file: {dir}/{lang}.php
-        $mainFile = $dir . DIRECTORY_SEPARATOR . $lang . '.php';
+        // 1) Load main file: {dir}/{lang}.{ext}
+        //    The extension follows the driver (json driver -> {lang}.json,
+        //    php driver -> {lang}.php). The other extension is tried as a
+        //    fallback so flat files written for the "wrong" driver still
+        //    load (the historical behaviour only ever tried {lang}.php,
+        //    which made flat .json files silently invisible under the
+        //    default json driver).
+        $ext = $this->langDriver === 'php' ? 'php' : 'json';
+        $altExt = $ext === 'json' ? 'php' : 'json';
 
-        if (is_readable($mainFile)) {
+        $mainFile = null;
+        $primary = $dir . DIRECTORY_SEPARATOR . $lang . '.' . $ext;
+        $secondary = $dir . DIRECTORY_SEPARATOR . $lang . '.' . $altExt;
+
+        if (is_readable($primary)) {
+            $mainFile = $primary;
+        } elseif (is_readable($secondary)) {
+            $mainFile = $secondary;
+            LogHandler::debug("Language main file using alternate extension: {$mainFile}");
+        }
+
+        if ($mainFile !== null) {
             $data = $this->parseFile($mainFile);
             if (is_array($data)) {
                 $merged = $data;
                 LogHandler::debug("Language main file loaded: {$mainFile} (" . count($data) . " keys)");
             }
         } else {
-            LogHandler::debug("Language main file not readable: {$mainFile}");
+            LogHandler::debug("Language main file not readable: {$primary}");
         }
 
-        // 2) If {dir}/{lang}/ subdirectory exists, load all php files from it
+        // 2) If {dir}/{lang}/ subdirectory exists, load every file from it as
+        //    "{filename}.{key}" (Language/fa/main.php -> main.adm.panel).
+        //    The driver extension is preferred; the other extension is loaded
+        //    as a fallback so a PHP file is never silently ignored under the
+        //    json driver (and vice versa) while a bot migrates file-by-file.
         $subDir = $dir . DIRECTORY_SEPARATOR . $lang;
 
         if (is_dir($subDir)) {
             $ext = $this->langDriver === 'php' ? 'php' : 'json';
+            $altExt = $ext === 'json' ? 'php' : 'json';
             $entries = @scandir($subDir);
 
             if ($entries !== false) {
-                $subFiles = [];
-                $suffix = '.' . $ext;
+                $preferred = [];
+                $alternate = [];
+
                 foreach ($entries as $entry) {
                     if ($entry === '.' || $entry === '..') {
                         continue;
                     }
-                    if (str_ends_with($entry, $suffix)) {
-                        $subFiles[] = $entry;
+                    if (str_ends_with($entry, '.' . $ext)) {
+                        $preferred[basename($entry, '.' . $ext)] = $entry;
+                    } elseif (str_ends_with($entry, '.' . $altExt)) {
+                        $alternate[basename($entry, '.' . $altExt)] = $entry;
                     }
                 }
-                sort($subFiles);
 
-                foreach ($subFiles as $file) {
+                // string keys: preferred entries overwrite same-name alternates
+                $subFiles = array_merge($alternate, $preferred);
+                ksort($subFiles);
+
+                foreach ($subFiles as $name => $file) {
                     $path = $subDir . DIRECTORY_SEPARATOR . $file;
                     $data = $this->parseFile($path);
                     if (is_array($data)) {
-                        $prefix = basename($file, '.' . $ext) . '.';
+                        $prefix = $name . '.';
                         $before = count($merged);
                         $merged = array_merge($merged, $this->prefixKeys($data, $prefix));
                         $after = count($merged);
@@ -207,6 +239,52 @@ class Language
         $this->saveToCache($lang, $this->translations[$lang]);
 
         LogHandler::debug("Language '{$lang}' total: " . count($this->translations[$lang]) . " keys");
+    }
+
+    /**
+     * One-shot lazy load of Language/{lang}/{prefix}.{ext} when a dot-key
+     * misses the loaded map. Returns true when a file existed and merged
+     * (the caller then retries the lookup).
+     */
+    private function tryLoadSubfile(string $lang, string $prefix): bool
+    {
+        if ($prefix === '' || isset($this->lazyLoaded[$lang][$prefix])) {
+            return false;
+        }
+        $this->lazyLoaded[$lang][$prefix] = true;
+
+        $dir = $this->languageDir ?: $this->resolveDir();
+        if (!$dir || !is_dir($dir)) {
+            return false;
+        }
+
+        $subDir = $dir . DIRECTORY_SEPARATOR . $lang;
+        if (!is_dir($subDir)) {
+            return false;
+        }
+
+        $ext = $this->langDriver === 'php' ? 'php' : 'json';
+        $altExt = $ext === 'json' ? 'php' : 'json';
+
+        foreach ([$ext, $altExt] as $candidate) {
+            $path = $subDir . DIRECTORY_SEPARATOR . $prefix . '.' . $candidate;
+            if (!is_readable($path)) {
+                continue;
+            }
+
+            $data = $this->parseFile($path);
+            if (is_array($data)) {
+                $this->translations[$lang] = array_merge(
+                    $this->translations[$lang] ?? [],
+                    $this->prefixKeys($data, $prefix . '.')
+                );
+                $this->saveToCache($lang, $this->translations[$lang]);
+                LogHandler::debug("Language lazy subfile loaded: {$prefix}.{$candidate}");
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -263,7 +341,10 @@ class Language
     private function parseFile(string $file): ?array
     {
         try {
-            if ($this->langDriver === 'php') {
+            // Parser follows the FILE extension, not the configured driver:
+            // a bot may keep fa/main.php beside en/main.json (authors moving
+            // from JSON to PHP file-by-file) — mixed formats must all load.
+            if (str_ends_with($file, '.php')) {
                 $res = require $file;
                 return is_array($res) ? $res : null;
             }
@@ -287,6 +368,19 @@ class Language
 
         $value = $this->translations[$lang][$key] ?? null;
 
+        // Lazy subfile load: a miss on "orders.created" tries
+        // Language/{lang}/orders.{php,json} exactly once. Covers subfiles
+        // added after the language cache was built (or during a stale TTL
+        // window) without forcing callers to know the file layout — the
+        // classic filename.key contract just works.
+        if ($value === null && str_contains($key, '.')) {
+            $prefix = substr($key, 0, (int)strpos($key, '.'));
+
+            if ($this->tryLoadSubfile($lang, $prefix)) {
+                $value = $this->translations[$lang][$key] ?? null;
+            }
+        }
+
         if ($value === null) {
             if (!isset($this->missingKeys[$lang][$key])) {
                 $this->missingKeys[$lang][$key] = true;
@@ -309,7 +403,13 @@ class Language
         $replace = [];
 
         foreach ($replacements as $k => $v) {
+            // Two placeholder syntaxes are supported: "#key" (historical)
+            // and ":key" (added after the demo — ":name" is what most
+            // authors reach for first). Both map to the same replacement
+            // value; only keys explicitly passed by the caller are touched.
             $search[] = "#{$k}";
+            $search[] = ":{$k}";
+            $replace[] = (string)$v;
             $replace[] = (string)$v;
         }
 

@@ -151,3 +151,17 @@
 - عمداً **هیچ دسته‌کلیدی به نام `VERIFY_TLS=false` وجود ندارد** — اعتبارسنجی TLS به api.telegram.org همیشه روشن است.
 
 </div>
+
+
+## LOG_API_TRACE (۲۰۲۶-۱۰)
+
+```dotenv
+LOG_API_TRACE=1            # برای هر فراخوانی Bot API یک خط تحویل
+LOG_API_TRACE_POLL=0       # همچنین traceشدن long-pollهای getUpdates (پر-سروصدا)
+```
+
+شکل خط: `📡 sendMessage → ok 128ms chat 82267967` (یا
+`… → FAIL 91ms chat 123 | 403 Forbidden: …`). هیچ‌وقت payload لاگ نمی‌شود —
+فقط متد، chat_id، مدت و خلاصهٔ خطا. ثبت آن از طریق هوک استاتیک
+`Telegram::onApiCall()` کتابخانه است، پس همهٔ بات‌های `BOT_EXTRA_BOTS` را هم
+می‌گیرد. برای لاگ‌های پرمس volumes روشن نگه ندارید.

@@ -1,0 +1,15 @@
+{
+  "update_id": 1003,
+  "callback_query": {
+    "id": "cbq1",
+    "from": {"id": 82267967, "is_bot": false, "first_name": "Ali", "language_code": "fa"},
+    "message": {
+      "message_id": 103,
+      "from": {"id": 398172019, "is_bot": true, "first_name": "Bot"},
+      "chat": {"id": 82267967, "type": "private", "first_name": "Ali"},
+      "date": 1791810000,
+      "text": "منو"
+    },
+    "data": "conv:demo:step1:yes"
+  }
+}

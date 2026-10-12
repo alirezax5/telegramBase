@@ -31,12 +31,17 @@
 - [docs/features.md](docs/en/features.md): sessions, keyboards, middleware, cache, i18n, scheduler, database, CLI
 - [docs/caching.md](docs/en/caching.md): CacheManager — drivers, config, TTL semantics, flush reach per driver, cross-process persistence matrix (live-verified)
 - [docs/sessions.md](docs/en/sessions.md): SessionManager API, multi-step flows, which driver you need, security notes
+- [docs/conversations.md](docs/en/conversations.md): Conversation engine — declarative steps, validation/retry, branching, back/menu nav, inline + Reply Keyboard, display/compute steps, timeout, CORE_PLUGINS enablement
 - [docs/i18n.md](docs/en/i18n.md): language file layout, `__()` helper, LANG_DRIVER pitfall, per-user language, cache behavior
 - [docs/buttons.md](docs/en/buttons.md): Keyboard builder API, ButtonManager/btn() file menus, callback handling, caching
 - [docs/multi-bot.md](docs/en/multi-bot.md): BotManager, BOT_EXTRA_BOTS, token stack, live-verified cross-bot scenarios; token-management strategy matrix (static .env / dynamic add() / Managed Bots) and Bot API 9.6 Managed Bots support (onManagedBot, registerManagedBot, requestManagedBot)
 - [docs/testing.md](docs/en/testing.md): offline suite, live tests, CI, known suite drift
+- [docs/media.md](docs/en/media.md): App\Shared\Media — download files by file_id, send by file_id or local path (CURLFile), destination dir rules
+- [docs/menu-flows.md](docs/en/menu-flows.md): MenuFlow — panel-style screens with built-in Back/Cancel, label navigation, parse-input screens, remove_keyboard on exit
+- [docs/recipes.md](docs/en/recipes.md): six production patterns — support relay with edit sync, non-stranding panels, private-only panel / reply-only group, delivery debugging, keyboard hygiene, Mini App entry
+- [docs/mini-apps.md](docs/en/mini-apps.md): Mini App `initData` validation (App\MiniApp\InitData) — official HMAC-SHA256 "WebAppData" scheme, token auto-detect, max_age replay window, endpoint pattern (form/JSON), build() dev fixture generator, security checklist; library twin: telegramBotApiPhp\WebApp\InitData
 - [docs/troubleshooting.md](docs/en/troubleshooting.md): symptoms → causes → fixes
-- [CHANGELOG.md](CHANGELOG.md): version history (starts at v2.4.0)
+- [CHANGELOG.md](CHANGELOG.md): version history (2026-10: LOG_API_TRACE, webhook CLI, tgbase simulate, MenuFlow, Media, Keyboard::remove/forceReply/webApp, lazy __() loader, edited_message docs, Mini App initData validator)
 
 ## Optional
 

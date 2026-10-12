@@ -8,7 +8,9 @@ use alirezax5\TelegramBase\App\Config\Config;
 use alirezax5\TelegramBase\App\Logger\LogHandler;
 use alirezax5\TelegramBase\App\Cache\CacheManager;
 use alirezax5\TelegramBase\App\Environment\EnvHandler;
+use alirezax5\TelegramBase\App\Plugin\Contract\FallbackInterface;
 use alirezax5\TelegramBase\App\Plugin\Contract\PluginInterface;
+use alirezax5\TelegramBase\App\Update\UpdateState;
 use telegramBotApiPhp\Telegram;
 
 class PluginHandler
@@ -41,6 +43,14 @@ class PluginHandler
     /** @var array<string,array<int,array{class:string,priority:int,chatTypes:array}>> */
     private array $plugins = [];
 
+    /**
+     * Plugins implementing FallbackInterface, indexed for the fallback
+     * phase (runs when no plugin marked the update handled).
+     *
+     * @var array<int,array{class:string,priority:int,chatTypes:array}>
+     */
+    private array $fallbacks = [];
+
     /** @var array<string,PluginInterface> */
     private array $instances = [];
 
@@ -55,6 +65,9 @@ class PluginHandler
 
     /** @var array<string,string> */
     private array $fileHashes = [];
+
+    /** FQCNs of registered core plugins (CORE_PLUGINS; outside Plugin/ dir scan) */
+    private array $corePlugins = [];
 
     public function __construct()
     {
@@ -129,8 +142,10 @@ class PluginHandler
         $files = $this->getPluginFiles();
 
         $this->plugins = [];
+        $this->fallbacks = [];
         $this->instances = [];
         $this->fileHashes = [];
+        $this->corePlugins = [];
 
         if (!$files) {
             LogHandler::warning("No plugin files found");
@@ -178,15 +193,59 @@ class PluginHandler
             }
         }
 
+        // ── Core plugins (framework-shipped, outside Plugin/) ──
+        // Registered from the CORE_PLUGINS env (comma-separated FQCNs).
+        // These live outside the scanned plugins dir — e.g. the Conversation
+        // engine App\Conversation\ConversationManager — so the file scan
+        // cannot find them. Priorities are re-sorted below, so insertion
+        // order does not matter.
+        foreach ($this->corePluginFqcns() as $coreFqcn) {
+            try {
+                if (!class_exists($coreFqcn)) {
+                    LogHandler::warning("Core plugin not found: {$coreFqcn}");
+                    continue;
+                }
+
+                $ref = new \ReflectionClass($coreFqcn);
+
+                if (
+                    !$ref->isInstantiable() ||
+                    !$ref->isSubclassOf(PluginInterface::class)
+                ) {
+                    continue;
+                }
+
+                /** @var PluginInterface $plugin */
+                $plugin = $ref->newInstance();
+                $this->instances[$coreFqcn] = $plugin;
+
+                $this->indexPlugin($plugin, $ref, $coreFqcn);
+
+                $this->corePlugins[] = $coreFqcn;
+
+                $loaded++;
+
+                LogHandler::debug("loaded core {$coreFqcn}");
+            } catch (\Throwable $e) {
+                LogHandler::error("Core plugin load error: {$coreFqcn} | {$e->getMessage()}");
+            }
+        }
+
         foreach ($this->plugins as &$group) {
             usort($group, fn($a, $b) =>
                 $a['priority'] <=> $b['priority']
             );
         }
+
+        usort($this->fallbacks, fn($a, $b) =>
+            $a['priority'] <=> $b['priority']
+        );
+
         $this->saveToCache();
         $this->lastReloadTime = time();
 
-        LogHandler::info("Plugins: {$loaded} loaded, {$skipped} skipped");
+        $fallbackCount = count($this->fallbacks);
+        LogHandler::info("Plugins: {$loaded} loaded, {$skipped} skipped, {$fallbackCount} fallback(s)");
     }
 
     private function indexPlugin(
@@ -225,6 +284,20 @@ class PluginHandler
                 ];
             }
         }
+
+        // Register the fallback phase ("command not found" hook).
+        // onFallback is NOT an update-type hook, so it never lands in
+        // $this->plugins — it lives in its own priority-sorted list.
+        if (
+            $ref->implementsInterface(FallbackInterface::class)
+            && $ref->hasMethod('onFallback')
+        ) {
+            $this->fallbacks[] = [
+                'class' => $fqcn,
+                'priority' => $priority,
+                'chatTypes' => $chatTypes,
+            ];
+        }
     }
 
     private function canRun(array $pluginData, string $chatType): bool
@@ -238,11 +311,50 @@ class PluginHandler
         return in_array($chatType, $chatTypes, true);
     }
 
+    /**
+     * FQCNs of core plugins from the CORE_PLUGINS env (comma-separated).
+     *
+     * Core plugins are framework-shipped (or app-registered) plugin classes
+     * that live outside the scanned Plugin/ directory — e.g. the Conversation
+     * engine App\Conversation\ConversationManager — and therefore cannot be
+     * discovered by the file scan. Leading backslashes are tolerated.
+     *
+     * @return string[]
+     */
+    private function corePluginFqcns(): array
+    {
+        $raw = (string)EnvHandler::get('CORE_PLUGINS', '');
+
+        if (trim($raw) === '') {
+            return [];
+        }
+
+        $out = [];
+        foreach (explode(',', $raw) as $fqcn) {
+            $fqcn = trim($fqcn, " \t\n\r\\");
+            if ($fqcn !== '') {
+                $out[] = $fqcn;
+            }
+        }
+
+        return $out;
+    }
+
     private function loadFromCache(): bool
     {
         $cached = CacheManager::get(self::CACHE_KEY_PLUGINS);
 
-        if (!is_array($cached) || !isset($cached['plugins'], $cached['hashes'])) {
+        // 'fallbacks' was added with the fallback phase — cache entries
+        // written by the previous handler version lack the key and are
+        // treated as invalid, forcing a one-time re-scan after deploy.
+        if (!is_array($cached) || !isset($cached['plugins'], $cached['hashes'], $cached['fallbacks'])) {
+            return false;
+        }
+
+        // Core plugins are tracked separately from the file-hash set — a
+        // changed CORE_PLUGINS env must invalidate the cache.
+        if (($cached['core'] ?? null) !== $this->corePluginFqcns()) {
+            LogHandler::info("Core plugin set changed -> cache invalid");
             return false;
         }
 
@@ -266,7 +378,9 @@ class PluginHandler
         }
 
         $this->plugins = $cached['plugins'];
+        $this->fallbacks = $cached['fallbacks'];
         $this->fileHashes = $cached['hashes'];
+        $this->corePlugins = is_array($cached['core'] ?? null) ? $cached['core'] : [];
         $this->instances = [];
 
         return true;
@@ -280,7 +394,9 @@ class PluginHandler
 
         CacheManager::put(self::CACHE_KEY_PLUGINS, [
             'plugins' => $this->plugins,
+            'fallbacks' => $this->fallbacks,
             'hashes' => $this->fileHashes,
+            'core' => $this->corePlugins,
             'time' => time(),
         ], $this->cacheTtl);
 
@@ -299,6 +415,10 @@ class PluginHandler
             return;
         }
 
+        // Fresh handled-flag for every update (webhook, polling and queue
+        // workers all dispatch one update per runAll() call).
+        UpdateState::reset();
+
         $method = 'on' . str_replace(' ', '', ucwords(str_replace('_', ' ', $type)));
 
         // chatType() may return null for updates without a chat (e.g.
@@ -309,7 +429,57 @@ class PluginHandler
 
         $this->run('before', $update->$type ?? null, $Telegram, $chatType);
         $this->run($method, $update->$type ?? null, $Telegram, $chatType);
+
+        // Fallback phase ("command not found"): fire only when NO plugin
+        // took responsibility for the update via UpdateState::markHandled().
+        if (!UpdateState::isHandled()) {
+            $this->runFallbacks($update->$type ?? null, $Telegram, $chatType);
+        }
+
         $this->run('after', $update->$type ?? null, $Telegram, $chatType);
+    }
+
+    /**
+     * Run the fallback phase: every FallbackInterface plugin receives the
+     * same payload as on{UpdateType}, in priority order, filtered by the
+     * ChatType attribute exactly like normal hooks.
+     *
+     * @param mixed   $data     Update payload for the detected type
+     * @param Telegram $Telegram Bot API instance
+     * @param string  $chatType Chat type ('private', 'group', ...)
+     */
+    private function runFallbacks(
+        mixed $data,
+        Telegram $Telegram,
+        string $chatType
+    ): void {
+
+        foreach ($this->fallbacks as $pluginData) {
+
+            if (!$this->canRun($pluginData, $chatType)) {
+                continue;
+            }
+
+            $fqcn = $pluginData['class'];
+
+            $plugin = $this->instances[$fqcn] ??= new $fqcn();
+
+            try {
+
+                $plugin->onFallback($data, $Telegram);
+
+            } catch (\Throwable $e) {
+
+                LogHandler::error(
+                    "Fallback error [onFallback] | " .
+                    "Plugin: {$fqcn} | " .
+                    "Message: {$e->getMessage()} | " .
+                    "File: {$e->getFile()} | " .
+                    "Line: {$e->getLine()} | " .
+                    "Code: {$e->getCode()}"
+                );
+            }
+        }
     }
 
     private function detectType($update): ?string
@@ -395,6 +565,8 @@ class PluginHandler
             'plugins' => count($classes),
             'handlers' => array_sum(array_map('count', $this->plugins)),
             'events' => array_keys($this->plugins),
+            'fallbacks' => count($this->fallbacks),
+            'core' => count($this->corePlugins),
         ];
     }
 }

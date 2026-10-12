@@ -76,6 +76,7 @@ Everything lives in `docs/` — start with the overview:
 | [docs/features.md](docs/en/features.md) | Sessions, keyboards, middleware, cache, i18n, scheduler, database |
 | [docs/caching.md](docs/en/caching.md) | CacheManager deep dive: drivers, TTLs, flush reach, cross-process matrix (live-verified) |
 | [docs/sessions.md](docs/en/sessions.md) | Per-chat session state: API, multi-step flows, security notes |
+| [docs/conversations.md](docs/en/conversations.md) | Multi-step conversation flows: declarative steps, validation/retry, branching, back/menu nav, inline + Reply Keyboard, timeout |
 | [docs/i18n.md](docs/en/i18n.md) | Translations: file layout, `__()` helper, per-user language, caching |
 | [docs/buttons.md](docs/en/buttons.md) | Keyboard builder + file-defined menus (`btn()`), callback handling |
 | [docs/multi-bot.md](docs/en/multi-bot.md) | Multiple bots in one process: `BotManager`, `BOT_EXTRA_BOTS`, token stack (live-verified) |

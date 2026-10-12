@@ -85,3 +85,17 @@ php tests/run.php --filter=Security   # env/log hardening rules
 بستر یکپارچگی که در crash-testing استفاده می‌شد (یک ربات واقعی + اسکریپت‌های سناریو) در `integration/TestBot/` قرار دارد — برای اینکه چه می‌کند و چطور آن را با دیپلوی خودتان وفق دهید، README آن را ببینید.
 
 </div>
+
+
+## پخش مجدد آپدیت‌ها — `tgbase simulate` (۲۰۲۶-۱۰)
+
+```bash
+php bin/tgbase simulate tests/Fixtures/updates/start.json --dry   # فقط پارس
+php bin/tgbase simulate tests/Fixtures/updates/                   # پخش همه
+php bin/tgbase simulate my_update.json                            # یک فیکسچر
+```
+
+`--dry` ساختار JSON و هوک پلاگینِ مقابل را گزارش می‌کند — بدون تماس با API.
+بدون آن، آپدیت از پایپ‌لاین واقعی عبور می‌کند (پلاگین‌ها واقعاً اجرا
+می‌شوند؛ روی ربات تست). فیکسچرهای نمونه در `tests/Fixtures/updates/`
+(start، edited_message، callback_query) و `examples/fixtures/` هستند.

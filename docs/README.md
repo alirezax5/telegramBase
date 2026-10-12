@@ -26,10 +26,19 @@ Documentation is available in **7 languages**. Every folder below is a complete,
 10. `features.md` — sessions, keyboards, middleware, cache, i18n, scheduler, database
 11. `caching.md` — CacheManager deep dive (live-verified)
 12. `sessions.md` — per-chat session state
+12.5. `conversations.md` — multi-step conversation flows (steps, validation, back/menu nav, inline + Reply Keyboard, timeout)
 13. `i18n.md` — translations, `__()` helper, per-user language
 14. `buttons.md` — keyboard builder + file-defined menus
 15. `multi-bot.md` — multiple bots in one process (live-verified)
-16. `testing.md` — offline suite, live tests, CI
+16. `testing.md` — offline suite, live tests, CI, update replay (`tgbase simulate`)
 17. `troubleshooting.md` — symptoms → causes → fixes
+18. `media.md` — download/send files (`App\Shared\Media`)
+19. `menu-flows.md` — MenuFlow panel screens with built-in Back/Cancel
+20. `recipes.md` — production patterns from a real support-bot deployment
+21. `mini-apps.md` — Telegram Mini App `initData` validation (`App\MiniApp\InitData`): signed-identity endpoint pattern, `max_age`, security checklist
+
+> **October 2026 upgrade batch:** `media.md` + `menu-flows.md` + `recipes.md` (en/fa), release summaries in `release-2026-10.md` for ar/zh/ru/fr/pt, and appended sections in webhook/testing/configuration/buttons/i18n/features (en/fa).
+
+> **Mini Apps:** `mini-apps.md` (en/fa full, ar/zh/ru/fr/pt compact) — server-side `initData` validation via `App\MiniApp\InitData`; runnable endpoint in `examples/MiniAppEndpoint.php`; cross-language test pin in `tests/Unit/MiniAppInitDataTest.php`.
 
 > **Canonical language:** English (`docs/en/`). Translations are refreshed from the English set at release time — if a translation reads stale, the English original is the source of truth.

@@ -19,6 +19,10 @@ final class BotManager
     private function __construct()
     {
         $this->initDefaultBot();
+
+        // LOG_API_TRACE=1 → one delivery line per outgoing Bot API call
+        // (static hook covers every instance, incl. BOT_EXTRA_BOTS).
+        ApiTrace::install();
     }
 
     public static function getInstance(): self

@@ -1,0 +1,17 @@
+<?php
+
+/**
+ * Core Conversation language strings (php driver).
+ * Sub-files are loaded with the file-name prefix → keys are conv.*.
+ */
+return [
+    'cancelled' => 'Conversation cancelled. ❌ (menu: /start)',
+    'exit_menu' => 'Main menu 🏠',
+    'timeout' => '⏰ Conversation timed out. To start again: :trigger (menu: /start)',
+    'busy' => '⚠️ You have an active conversation. Continue, or cancel it with /cancel.',
+    'use_buttons' => 'This step only accepts the buttons above. 🔘' . "\n" . 'To exit: /cancel or the «Main menu» button.',
+    'stale' => 'This button is no longer valid.',
+    'skip_not_allowed' => 'This step cannot be skipped.',
+    'retry_default' => 'Invalid input; please try again.',
+    'nav_back' => '↩️ Back',
+];
