@@ -385,6 +385,12 @@ class Language
             if (!isset($this->missingKeys[$lang][$key])) {
                 $this->missingKeys[$lang][$key] = true;
                 $this->missingKeysDirty = true;
+                // One debug line per (lang, key) miss so silent i18n misses —
+                // the "buttons show raw keys" class of bug — surface in the
+                // app log without any configuration (found on a production
+                // deployment where unprefixed keys missed a prefix-only
+                // layout, 2026-10-13).
+                LogHandler::debug("Language miss: {$lang}.{$key}");
             }
 
             $value = $default ?? $key;
@@ -407,6 +413,20 @@ class Language
             // and ":key" (added after the demo — ":name" is what most
             // authors reach for first). Both map to the same replacement
             // value; only keys explicitly passed by the caller are touched.
+            //
+            // Callers hand the key in BOTH shapes — bare ('reward') and
+            // with the sigil already attached (':reward', '#reward').
+            // Normalize the sigil off before building the search pair:
+            // a raw ':reward' key used to produce '::reward'/'#:reward'
+            // searches that never matched the ':reward' placeholder, so
+            // every text showed its variables UNREPLACED (production
+            // bug found 2026-10-13: wallet/daily/ads/pack texts all
+            // printed literal :balance/:reward/:count).
+            $k = ltrim((string) $k, ':#');
+            if ($k === '') {
+                continue;
+            }
+
             $search[] = "#{$k}";
             $search[] = ":{$k}";
             $replace[] = (string)$v;

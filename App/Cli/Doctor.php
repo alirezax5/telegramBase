@@ -265,7 +265,9 @@ final class Doctor
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
-        curl_close($ch);
+        // No curl_close() — it is deprecated since PHP 8.5 and has been a
+        // no-op since 8.0; the handle is garbage-collected when $ch goes out
+        // of scope (same pattern as Cli\Webhook::api()).
 
         if ($response === false) {
             $this->results[] = [

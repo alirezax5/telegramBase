@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace alirezax5\TelegramBase\Cli;
 
+use alirezax5\TelegramBase\App\Bootstrap\EnvironmentBootstrap;
 use alirezax5\TelegramBase\App\Paths;
 
 /**
@@ -71,6 +72,16 @@ final class Console
         $args = array_slice($this->argv, 2);
 
         try {
+            // CLI entry points (bin/tgbase) never pass through Bootstrap::boot(),
+            // so the project .env was never loaded here — EnvHandler saw nothing
+            // and every env-backed command (webhook:set/del/info, simulate,
+            // retry:drain, migrate, …) reported "BOT_TOKEN is not set." even with
+            // a valid .env right next to bin/tgbase. Doctor carried its own
+            // private loadDotEnv() workaround; fix it once, centrally, instead.
+            // help/list/unknown stay env-free, and a malformed .env surfaces as a
+            // normal command error (rc 1) rather than a fatal.
+            EnvironmentBootstrap::boot();
+
             $result = ($this->commands[$command])($args);
             // Commands that return an int use it as the exit code;
             // commands that return null are assumed successful.

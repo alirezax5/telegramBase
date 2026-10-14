@@ -11,6 +11,7 @@ use alirezax5\TelegramBase\App\Environment\EnvHandler;
  *
  *   php bin/tgbase webhook:info
  *   php bin/tgbase webhook:set --url=https://example.com/webhook.php
+ *                            [--token=...]            (default: BOT_TOKEN env)
  *                            [--secret=...]           (default: BOT_WEBHOOK_SECRET env)
  *                            [--updates=message,edited_message,callback_query]
  *                            [--max-connections=40]
@@ -43,7 +44,7 @@ final class Webhook
             case 'delete':
                 return self::del($flags);
             case 'info':
-                return self::info();
+                return self::info($flags);
             default:
                 self::help();
                 return 1;
@@ -53,10 +54,9 @@ final class Webhook
     private static function set(array $flags): int
     {
         $url = (string)($flags['url'] ?? EnvHandler::get('BOT_WEBHOOK_URL', ''));
-        $token = (string)EnvHandler::get('BOT_TOKEN', '');
+        $token = self::resolveToken($flags);
 
-        if ($token === '') {
-            echo "BOT_TOKEN is not set.\n";
+        if ($token === null) {
             return 1;
         }
 
@@ -69,10 +69,17 @@ final class Webhook
         $params = [
             'url' => $url,
             'max_connections' => (int)($flags['max-connections'] ?? 40),
+            // Resolution order (TM-40 fix): --updates flag > ALLOWED_UPDATES
+            // env (the deployment's declared contract) > framework default.
+            // webhook:set previously ignored the env entirely, so every
+            // re-registration silently reverted the bot's subscription to
+            // the framework default — dropping types the deployment relies
+            // on (e.g. pre_checkout_query for Telegram Stars payments).
             'allowed_updates' => json_encode(
                 array_values(array_filter(array_map(
                     'trim',
-                    explode(',', (string)($flags['updates'] ?? self::DEFAULT_UPDATES))
+                    explode(',', (string)($flags['updates']
+                        ?? EnvHandler::get('ALLOWED_UPDATES', self::DEFAULT_UPDATES)))
                 ), static fn ($v) => $v !== ''))
             ),
         ];
@@ -98,9 +105,9 @@ final class Webhook
 
     private static function del(array $flags): int
     {
-        $token = (string)EnvHandler::get('BOT_TOKEN', '');
-        if ($token === '') {
-            echo "BOT_TOKEN is not set.\n";
+        $token = self::resolveToken($flags);
+
+        if ($token === null) {
             return 1;
         }
 
@@ -115,11 +122,11 @@ final class Webhook
         return self::printResult($resp);
     }
 
-    private static function info(): int
+    private static function info(array $flags = []): int
     {
-        $token = (string)EnvHandler::get('BOT_TOKEN', '');
-        if ($token === '') {
-            echo "BOT_TOKEN is not set.\n";
+        $token = self::resolveToken($flags);
+
+        if ($token === null) {
             return 1;
         }
 
@@ -144,7 +151,10 @@ final class Webhook
 
         if (empty($r['url'])) {
             echo "\nhint: use `php bin/tgbase webhook:set --url=...` to activate the bot.\n";
-        } elseif (!in_array('edited_message', $r['allowed_updates'] ?? [], true)) {
+        } elseif (isset($r['allowed_updates']) && !in_array('edited_message', $r['allowed_updates'], true)) {
+            // Warn ONLY on an explicit list that omits edited_message. When
+            // allowed_updates is absent Telegram delivers ALL update types —
+            // including edits — so warning there was a false positive.
             echo "\nwarning: allowed_updates does NOT include edited_message —"
                 . " onEditedMessage() hooks will never fire.\n";
         }
@@ -153,6 +163,37 @@ final class Webhook
     }
 
     // ------------------------------------------------------------------
+
+    /**
+     * Resolve the bot token for a subcommand.
+     *
+     * Precedence: explicit --token flag first, then BOT_TOKEN env (the
+     * project .env is loaded by Console before dispatch). On success the
+     * source and length are printed — never the value itself. Returns null
+     * (after printing a fix-it hint) when no token is available.
+     *
+     * @param array<string,string|true> $flags
+     */
+    private static function resolveToken(array $flags): ?string
+    {
+        $flagToken = trim((string)($flags['token'] ?? ''));
+
+        if ($flagToken !== '') {
+            echo 'token: set (' . strlen($flagToken) . " chars, from --token flag)\n";
+            return $flagToken;
+        }
+
+        $token = trim((string)EnvHandler::get('BOT_TOKEN', ''));
+
+        if ($token !== '') {
+            echo 'token: set (' . strlen($token) . " chars, from BOT_TOKEN env)\n";
+            return $token;
+        }
+
+        echo "BOT_TOKEN is not set — pass --token=… or set BOT_TOKEN in .env.\n";
+
+        return null;
+    }
 
     private static function api(string $token, string $method, array $params): ?array
     {
@@ -167,7 +208,8 @@ final class Webhook
         ]);
         $response = curl_exec($ch);
         $error = curl_error($ch);
-        curl_close($ch);
+        // No curl_close() — deprecated since PHP 8.5, no-op since 8.0; the
+        // handle is released when $ch goes out of scope (same as Doctor).
 
         if ($response === false) {
             echo "curl error: {$error}\n";
@@ -225,6 +267,7 @@ final class Webhook
         echo "  php bin/tgbase webhook:del [--drop-pending]\n";
         echo "\nOptions:\n";
         echo "  --url=...            HTTPS webhook URL (required for set)\n";
+        echo "  --token=...          bot token (default: BOT_TOKEN env / .env)\n";
         echo "  --secret=...         secret token (default: BOT_WEBHOOK_SECRET env)\n";
         echo "  --updates=a,b,c      allowed_updates (default: " . self::DEFAULT_UPDATES . ")\n";
         echo "  --max-connections=N  default 40\n";

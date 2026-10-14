@@ -36,10 +36,31 @@ final class BotManager
         $this->bots[$this->defaultBotName] = new Telegram(
             $config->token,
             $config->apiUrl,
-            $config->apiUrlFile
+            $this->fileUrlTemplate()
         );
 
         $this->registerExtraBotsFromEnv();
+    }
+
+    /**
+     * TM-37: the lib's 3rd ctor arg is a file-URL TEMPLATE
+     * ("{url}/file/bot{token}/{file_path}"), not a plain URL. Passing
+     * BOT_API_URL_FILE verbatim left the template without placeholders, so
+     * getFileUrl() collapsed every download to the bare API host and the
+     * bot fetched the api.telegram.org HTML portal instead of files
+     * (HTTP 200 text/html) — bot-side media handling rejected everything.
+     * Build the template from the configured host, preserving a local
+     * bot-api server host when one is configured.
+     */
+    private function fileUrlTemplate(): string
+    {
+        $config = Config::bot();
+        $fileHost = rtrim((string) $config->apiUrlFile, '/');
+        if ($fileHost === '' || $fileHost === rtrim((string) $config->apiUrl, '/')) {
+            return '{url}/file/bot{token}/{file_path}'; // standard host — lib template semantics
+        }
+
+        return $fileHost . '/file/bot{token}/{file_path}'; // local bot-api server
     }
 
     /**
@@ -240,7 +261,7 @@ final class BotManager
         }
 
         $config = Config::bot();
-        $bot = new Telegram($token, $config->apiUrl, $config->apiUrlFile);
+        $bot = new Telegram($token, $config->apiUrl, $this->fileUrlTemplate());
         $this->add($name, $bot);
 
         LogHandler::info(

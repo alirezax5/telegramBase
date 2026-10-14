@@ -98,6 +98,11 @@ php bin/tgbase webhook:set --url=https://host/webhook.php
 php bin/tgbase webhook:del [--drop-pending]
 ```
 
+توکن از `BOT_TOKEN` خوانده می‌شود (`.env` برای همهٔ دستورهای `bin/tgbase`
+به‌صورت خودکار بارگذاری می‌شود)؛ فلگ اختیاری `--token=…` برای یک فراخوانی
+روی آن اولویت دارد. هر زیرفرمان چاپ می‌کند که توکن از کجا آمده —
+`token: set (46 chars, from BOT_TOKEN env)` — بدون نمایش خودِ مقدار.
+
 `webhook:set` مقدار `secret_token` را از `BOT_WEBHOOK_SECRET` برمی‌دارد و
 لیست پیش‌فرض توصیه‌شدهٔ `allowed_updates` را می‌گذارد —
 `message,edited_message,callback_query,my_chat_member,chat_member` — پس

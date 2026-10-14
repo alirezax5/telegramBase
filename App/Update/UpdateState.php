@@ -18,6 +18,9 @@ namespace alirezax5\TelegramBase\App\Update;
  *   - Plugins implementing {@see \alirezax5\TelegramBase\App\Plugin\Contract\FallbackInterface}
  *     are invoked by PluginHandler only when the flag was NOT set —
  *     the canonical "command not found" hook.
+ *   - A plugin that must STOP every later plugin from seeing the same
+ *     update (e.g. a force-join gate) additionally calls haltPropagation().
+ *     PluginHandler then skips all remaining hooks for this update.
  *
  * State lives for the lifetime of one update: PluginHandler::runAll()
  * resets it before dispatching, so webhook, polling and queue workers
@@ -39,6 +42,9 @@ final class UpdateState
     private static bool $handled = false;
 
     private static ?string $handledBy = null;
+
+    /** TM-48: when true, PluginHandler stops dispatching further plugins. */
+    private static bool $halted = false;
 
     /**
      * Mark the current update as handled.
@@ -70,6 +76,26 @@ final class UpdateState
     }
 
     /**
+     * TM-48: stop the dispatch chain — no further plugin hooks (and no
+     * fallback phase) run for the current update. Pair with
+     * markHandled(). Intended for gates such as «join the channel
+     * first» that must answer INSTEAD of every other feature.
+     */
+    public static function haltPropagation(?string $by = null): void
+    {
+        self::$halted = true;
+        if (self::$handledBy === null && $by !== null) {
+            self::$handledBy = $by;
+        }
+    }
+
+    /** Whether haltPropagation() was called for the current update. */
+    public static function isHalted(): bool
+    {
+        return self::$halted;
+    }
+
+    /**
      * Clear the flag. Called by PluginHandler before each update and
      * safe to call in tests between cases.
      */
@@ -77,5 +103,6 @@ final class UpdateState
     {
         self::$handled = false;
         self::$handledBy = null;
+        self::$halted = false;
     }
 }

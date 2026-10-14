@@ -26,6 +26,11 @@ use telegramBotApiPhp\Telegram;
  *     [2026-10-12 17:41:02] [INFO]: 📡 sendMessage → ok 128ms chat 82267967
  *     [2026-10-12 17:41:09] [ERROR]: 📡 sendMessage → FAIL 91ms chat 12345 | 403 Forbidden: bot was blocked by the user
  *
+ * Requires telegram-bot-php ^3.4 (the release that introduced the static
+ * onApiCall() hook). On older library installs the switch degrades to a
+ * single boot warning instead of a fatal — tracing must never be able to
+ * break delivery OR boot.
+ *
  * Privacy note: payloads are deliberately NOT logged — only method, chat_id
  * (when present in the request), duration, ok/fail and Telegram's error
  * summary. Full request/response debugging stays the job of a dedicated
@@ -52,6 +57,16 @@ final class ApiTrace
         }
 
         self::$installed = true;
+
+        // The static onApiCall() hook ships with telegram-bot-php 3.4+.
+        // On an older install (e.g. a lock still pinned to 3.3.0) the call
+        // would be a fatal "undefined method" at boot — degrade instead.
+        if (!method_exists(Telegram::class, 'onApiCall')) {
+            LogHandler::warning(
+                '📡 LOG_API_TRACE ignored: telegram-bot-php ^3.4 required (onApiCall hook missing)'
+            );
+            return;
+        }
 
         Telegram::onApiCall(static function (array $info): void {
             // Collapse the long-poll heartbeat unless explicitly wanted.

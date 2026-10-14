@@ -123,6 +123,11 @@ php bin/tgbase webhook:set --url=https://host/webhook.php
 php bin/tgbase webhook:del [--drop-pending]
 ```
 
+Tokens resolve from `BOT_TOKEN` (`.env` is loaded automatically for every
+`bin/tgbase` command); an explicit `--token=…` flag overrides it for one
+invocation. Each subcommand prints which source it used — `token: set
+(46 chars, from BOT_TOKEN env)` — without echoing the value itself.
+
 `webhook:set` derives `secret_token` from `BOT_WEBHOOK_SECRET` and uses the
 recommended `allowed_updates` default — `message,edited_message,
 callback_query,my_chat_member,chat_member` — so `onEditedMessage()` hooks

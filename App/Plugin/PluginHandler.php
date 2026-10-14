@@ -172,6 +172,18 @@ class PluginHandler
                     !$ref->isInstantiable() ||
                     !$ref->isSubclassOf(PluginInterface::class)
                 ) {
+                    // Loud diagnostic for the FallbackInterface trap: the
+                    // contract requires fallbacks to implement BOTH
+                    // interfaces; a fallback-only class used to be silently
+                    // counted as "skipped" and the bot shipped with
+                    // "0 fallback(s)" and no explanation (found on a
+                    // production deployment, 2026-10-13).
+                    if ($ref->implementsInterface(FallbackInterface::class)) {
+                        LogHandler::warning(
+                            "Plugin {$fqcn} implements FallbackInterface but not PluginInterface — skipped."
+                            . " Fallbacks must implement BOTH (see FallbackInterface docblock)."
+                        );
+                    }
                     $skipped++;
                     continue;
                 }
@@ -360,7 +372,26 @@ class PluginHandler
 
         $files = $this->getPluginFiles();
 
-        if (count($files) !== count($cached['hashes'])) {
+        // Compare the SCANNED FILE LIST (helpers included), never the
+        // loaded-plugin count: a project may keep non-plugin helper classes
+        // under Plugin/ (e.g. Plugin/X/Support/User.php). Comparing
+        // count($files) against count($cached['hashes']) made the cache
+        // invalidate on EVERY request in that layout — full rescan + resave
+        // per hit plus "Plugin set changed" log spam (found on a production
+        // deployment, 2026-10-13).
+        $cachedFiles = $cached['files'] ?? null;
+        $current = $files;
+        sort($current);
+
+        if (!is_array($cachedFiles) || count($cachedFiles) !== count($current)) {
+            LogHandler::info("Plugin set changed -> cache invalid");
+            return false;
+        }
+
+        $stored = $cachedFiles;
+        sort($stored);
+
+        if ($stored !== $current) {
             LogHandler::info("Plugin set changed -> cache invalid");
             return false;
         }
@@ -369,7 +400,11 @@ class PluginHandler
             $fqcn = $this->pathToClass($file);
             $hash = (string)filemtime($file);
 
-            if (($cached['hashes'][$fqcn] ?? null) !== $hash) {
+            // Edits are tracked per LOADED plugin only; helper files are
+            // require_once'd fresh every request, so their mtime does not
+            // participate in cache validation (opcache serves their current
+            // definition regardless).
+            if (isset($cached['hashes'][$fqcn]) && $cached['hashes'][$fqcn] !== $hash) {
                 LogHandler::info("Plugin change detected -> cache invalid");
                 return false;
             }
@@ -396,6 +431,12 @@ class PluginHandler
             'plugins' => $this->plugins,
             'fallbacks' => $this->fallbacks,
             'hashes' => $this->fileHashes,
+            // Scanned file list (helpers included) — the cache-validity
+            // contract compares THIS against the current scan, not the
+            // loaded-plugin count. A project keeping non-plugin helper
+            // classes under Plugin/ (e.g. Plugin/X/Support/User.php) used
+            // to invalidate the cache on every single request.
+            'files' => $this->getPluginFiles(),
             'core' => $this->corePlugins,
             'time' => time(),
         ], $this->cacheTtl);
@@ -507,6 +548,13 @@ class PluginHandler
     ): void {
 
         foreach ($this->plugins[$method] ?? [] as $pluginData) {
+
+            // TM-48: a gate plugin (haltPropagation) can stop the whole
+            // dispatch chain for this update — later hooks and the
+            // fallback phase are then skipped as well.
+            if (UpdateState::isHalted()) {
+                break;
+            }
 
             if (!$this->canRun($pluginData, $chatType)) {
                 continue;

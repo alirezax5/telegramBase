@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use alirezax5\TelegramBase\App\Cache\CacheManager;
 use alirezax5\TelegramBase\App\Plugin\PluginHandler;
 
 /**
@@ -158,5 +159,191 @@ class PluginHandlerTest extends TgBaseTestCase
         $a->true(isset($stats['events']));
         $a->equals(2, $stats['plugins'], 'two distinct classes registered');
         $a->equals(3, $stats['handlers'], 'three handler entries across events');
+    }
+
+    // ------------------------------------------------ plugin cache validity
+
+    /**
+     * Temp plugin dir with: one good plugin (implements BOTH contracts),
+     * one fallback-only class (violates the documented contract), and one
+     * non-plugin helper under Support/. Fixture is created ONCE per process
+     * — the scanner require_once's the files, so a second fixture with the
+     * same class names would fatal with "cannot redeclare class".
+     *
+     * @return array{dir: string, files: array<int,string>, good: string, only: string}
+     */
+    private function makeCacheFixture(): array
+    {
+        static $fx = null;
+        if ($fx !== null) {
+            return $fx;
+        }
+
+        $dir = sys_get_temp_dir() . '/tgbase_plcache_' . uniqid();
+        @mkdir($dir . '/Support', 0777, true);
+
+        // Namespace MUST mirror the file path — pathToClass() derives the
+        // FQCN from the location under the scanned dir.
+        $good = 'CacheGoodPlugin' . bin2hex(random_bytes(3));
+        $only = 'CacheFallbackOnly' . bin2hex(random_bytes(3));
+
+        file_put_contents($dir . '/' . $good . '.php', '<?php
+namespace alirezax5\TelegramBase\Plugin;
+
+use alirezax5\TelegramBase\App\Attributes\ChatType;
+use alirezax5\TelegramBase\App\Plugin\Contract\FallbackInterface;
+use alirezax5\TelegramBase\App\Plugin\Contract\PluginInterface;
+use alirezax5\TelegramBase\App\Update\UpdateState;
+use telegramBotApiPhp\Telegram;
+
+#[ChatType([\'private\'])]
+class ' . $good . ' implements PluginInterface, FallbackInterface
+{
+    public function getPriority(): int { return 10; }
+    public function onMessage($msg, Telegram $tg): void { UpdateState::markHandled(); }
+    public function onFallback($data, Telegram $tg): void { }
+}
+');
+
+        file_put_contents($dir . '/' . $only . '.php', '<?php
+namespace alirezax5\TelegramBase\Plugin;
+
+use alirezax5\TelegramBase\App\Plugin\Contract\FallbackInterface;
+use telegramBotApiPhp\Telegram;
+
+class ' . $only . ' implements FallbackInterface
+{
+    public function onFallback($data, Telegram $tg): void { }
+}
+');
+
+        file_put_contents($dir . '/Support/CacheHelper.php', '<?php
+namespace alirezax5\TelegramBase\Plugin\Support;
+
+class CacheHelper
+{
+    public static function ping(): string { return \'pong\'; }
+}
+');
+
+        $files = [];
+        foreach (scandir($dir) !== false ? array_merge([$dir], glob($dir . '/*.php') ?: [], glob($dir . '/Support/*.php') ?: []) : [] as $f) {
+            if (is_file($f)) {
+                $files[] = $f;
+            }
+        }
+
+        $fx = [
+            'dir' => $dir,
+            'files' => $files,
+            'good' => '\\alirezax5\\TelegramBase\\Plugin\\' . $good,
+            'only' => '\\alirezax5\\TelegramBase\\Plugin\\' . $only,
+        ];
+
+        return $fx;
+    }
+
+    /**
+     * Handler pointed at a temp dir WITHOUT running the constructor (the
+     * real one reads the process-global Config::plugins()->path).
+     */
+    private function handlerFor(string $dir): PluginHandler
+    {
+        $ref = new ReflectionClass(PluginHandler::class);
+        $handler = $ref->newInstanceWithoutConstructor();
+
+        foreach ([
+            'pluginsDir' => $dir,
+            'enableCache' => true,
+            'cacheTtl' => 300,
+            'reloadInterval' => 60,
+            'lastReloadTime' => 0,
+            'updateTypesFlip' => array_fill_keys(['message', 'callback_query'], true),
+        ] as $prop => $value) {
+            $p = $ref->getProperty($prop);
+            $p->setAccessible(true);
+            $p->setValue($handler, $value);
+        }
+
+        return $handler;
+    }
+
+    public function test_fallback_only_class_is_skipped_with_warning(TgAssert $a): void
+    {
+        // Regression (2026-10-13, production BankSticker deployment): a class
+        // implementing ONLY FallbackInterface was silently counted as
+        // "skipped" — the bot logged "0 fallback(s)" and unknown messages
+        // got no answer. The contract (FallbackInterface docblock) requires
+        // BOTH interfaces; the compliant class registers, the violator does
+        // not (now with a loud warning in the log).
+        $fx = $this->makeCacheFixture();
+        CacheManager::forget('plugin_handler:plugins_index');
+
+        try {
+            $h = $this->handlerFor($fx['dir']);
+            $h->loadPlugins();
+
+            $ref = new ReflectionClass($h);
+
+            $inst = $ref->getProperty('instances');
+            $inst->setAccessible(true);
+            $instances = $inst->getValue($h);
+
+            $a->equals(true, isset($instances[$fx['good']]));
+            $a->equals(false, isset($instances[$fx['only']]));
+
+            $fb = $ref->getProperty('fallbacks');
+            $fb->setAccessible(true);
+            $fallbacks = $fb->getValue($h);
+
+            $a->equals(1, count($fallbacks));
+            $a->equals($fx['good'], $fallbacks[0]['class']);
+        } finally {
+            CacheManager::forget('plugin_handler:plugins_index');
+        }
+    }
+
+    public function test_plugin_cache_survives_non_plugin_helper_files(TgAssert $a): void
+    {
+        // Regression (2026-10-13, production BankSticker deployment): cache
+        // validity compared count(scanned files) against count(loaded-plugin
+        // hashes). With helper classes under Plugin/ (e.g. Support/User.php)
+        // that comparison could never match, so every single request logged
+        // "Plugin set changed -> cache invalid" and rescanned from scratch.
+        $fx = $this->makeCacheFixture();
+        $key = 'plugin_handler:plugins_index';
+
+        try {
+            CacheManager::forget($key);
+
+            $h1 = $this->handlerFor($fx['dir']);
+            $h1->loadPlugins();
+
+            $cached = CacheManager::get($key);
+            $a->equals(true, is_array($cached));
+            // The scan list includes the helper file; hashes stay per-plugin.
+            $a->equals(count($fx['files']), count($cached['files'] ?? []));
+            $a->equals(1, count($cached['hashes'] ?? []));
+
+            // Poison the index with a sentinel map but keep files+hashes
+            // intact: a VALID cache must be restored verbatim. Under the old
+            // count-vs-count check this payload was always rejected.
+            $cached['plugins'] = ['__cache_restore_sentinel__' => [
+                ['class' => 'x', 'priority' => 1, 'chatTypes' => []],
+            ]];
+            CacheManager::put($key, $cached, 300);
+
+            $h2 = $this->handlerFor($fx['dir']);
+            $h2->loadPlugins();
+
+            $ref = new ReflectionClass($h2);
+            $plugins = $ref->getProperty('plugins');
+            $plugins->setAccessible(true);
+            $value = $plugins->getValue($h2);
+
+            $a->equals(true, isset($value['__cache_restore_sentinel__']));
+        } finally {
+            CacheManager::forget($key);
+        }
     }
 }
